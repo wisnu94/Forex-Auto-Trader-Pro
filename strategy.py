@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 
+from mtf import mtf_allows_signal
 
 # ============================================================
 # INDICATORS
@@ -122,7 +123,8 @@ def generate_signal(
     df,
     ema_fast=20,
     ema_slow=50,
-    atr_period=14
+    atr_period=14,
+    mtf_confirmation=None
 ):
 
     minimum_bars = max(
@@ -217,9 +219,28 @@ def generate_signal(
 
     elif sell_score >= 70 and sell_score > buy_score:
         signal = "SELL"
+        
+    # --------------------------------------------------------
+    # MTF CONFIRMATION FILTER
+    # --------------------------------------------------------
+    
+    if mtf_confirmation is not None:
+    
+        if signal != "HOLD":
+    
+            if not mtf_allows_signal(
+                signal,
+                mtf_confirmation
+            ):
+                signal = "HOLD"
 
     return {
         "signal": signal,
+        "mtf_status": (
+            mtf_confirmation["status"]
+            if mtf_confirmation is not None
+            else "NOT_CHECKED"
+        ),
         "trend": trend,
         "structure": structure,
         "momentum": round(momentum, 4),
