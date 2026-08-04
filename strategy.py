@@ -249,6 +249,59 @@ def calculate_precision_score(
         score += 5
 
     return min(score, 100)
+    
+# ============================================================
+# PRECISION GRADE ENGINE
+# ============================================================
+
+def get_precision_grade(score):
+
+    if score >= 90:
+        return "A+"
+
+    if score >= 80:
+        return "A"
+
+    if score >= 70:
+        return "B"
+
+    if score >= 60:
+        return "C"
+
+    return "D"
+
+
+def get_precision_decision(
+    signal,
+    score,
+    precision_pass
+):
+
+    if not precision_pass:
+        return "NO_TRADE"
+
+    if score >= 90:
+        if signal == "BUY":
+            return "STRONG_BUY"
+
+        if signal == "SELL":
+            return "STRONG_SELL"
+
+    if score >= 80:
+        if signal == "BUY":
+            return "BUY"
+
+        if signal == "SELL":
+            return "SELL"
+
+    if score >= 70:
+        if signal == "BUY":
+            return "VALID_BUY"
+
+        if signal == "SELL":
+            return "VALID_SELL"
+
+    return "NO_TRADE"
 
 # ============================================================
 # SIGNAL ENGINE
@@ -413,6 +466,17 @@ def generate_signal(
         "signal": signal,
         "precision_pass": precision_pass,
         "precision_score": precision_score,
+        
+        "precision_grade": get_precision_grade(
+            precision_score
+        ),
+
+        "precision_decision": get_precision_decision(
+            signal=signal,
+            score=precision_score,
+            precision_pass=precision_pass
+        ),
+        
         "mtf_status": (
             mtf_confirmation["status"]
             if mtf_confirmation is not None
