@@ -110,8 +110,117 @@ jobs:
       # RISK ENGINE TEST
       # ======================================================
 
-      - name: Risk engine test
+      # ======================================================
+      # MTF ENGINE TEST
+      # ======================================================
+
+      - name: MTF engine test
         run: |
+          python - <<'PY'
+
+          import pandas as pd
+          import numpy as np
+
+          import mtf
+
+
+          # --------------------------------------------------
+          # CREATE SYNTHETIC BULLISH DATA
+          # --------------------------------------------------
+
+          rows = 150
+
+          close = np.linspace(
+              1.0800,
+              1.1200,
+              rows
+          )
+
+          df = pd.DataFrame({
+              "open": close,
+              "high": close + 0.0010,
+              "low": close - 0.0010,
+              "close": close,
+              "tick_volume": np.ones(rows) * 1000,
+              "spread": np.zeros(rows),
+              "real_volume": np.zeros(rows),
+          })
+
+
+          # --------------------------------------------------
+          # TEST TREND DETECTION
+          # --------------------------------------------------
+
+          trend = mtf.timeframe_trend(
+              df,
+              fast_period=20,
+              slow_period=50
+          )
+
+          assert trend == "BUY"
+
+          print(
+              "MTF trend detection: PASS"
+          )
+
+
+          # --------------------------------------------------
+          # TEST SCORE
+          # --------------------------------------------------
+
+          trends = {
+              "H4": "BUY",
+              "H1": "BUY",
+              "M15": "BUY",
+          }
+
+          score = mtf.calculate_mtf_score(
+              trends
+          )
+
+          assert score == 100
+
+          print(
+              "MTF score test: PASS"
+          )
+
+          print(
+              "Score:",
+              score
+          )
+
+
+          # --------------------------------------------------
+          # TEST CONFIRMATION STATUS
+          # --------------------------------------------------
+
+          confirmation = {
+              "trends": trends,
+              "score": score,
+              "status": "STRONG_BUY",
+          }
+
+          assert mtf.mtf_allows_signal(
+              "BUY",
+              confirmation
+          )
+
+          assert not mtf.mtf_allows_signal(
+              "SELL",
+              confirmation
+          )
+
+          print(
+              "MTF signal filter: PASS"
+          )
+
+
+          print()
+          print(
+              "MTF ENGINE TEST: PASS"
+          )
+
+          PY
           python - <<'PY'
 
           from risk import (
