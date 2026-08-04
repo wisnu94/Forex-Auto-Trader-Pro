@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 from backtest import (
     backtest_strategy,
@@ -53,26 +54,62 @@ def main():
     print()
 
     # --------------------------------------------------------
-    # LOAD HISTORICAL DATA
+    # LOAD BACKTEST DATA
     # --------------------------------------------------------
+    #
+    # GitHub Actions tidak membutuhkan MT5.
+    # Gunakan synthetic OHLC data untuk validasi engine.
+    #
 
-    df = get_bars(
-        SYMBOL,
-        TIMEFRAME,
-        count=BARS
+    rng = np.random.default_rng(42)
+
+    returns = rng.normal(
+        loc=0.00005,
+        scale=0.001,
+        size=BARS
     )
 
-    if df is None or df.empty:
-
-        print(
-            "BACKTEST FAILED: "
-            "No historical data"
+    close = (
+        1.1000
+        * np.exp(
+            np.cumsum(returns)
         )
+    )
 
-        return
+    open_price = np.roll(
+        close,
+        1
+    )
+
+    open_price[0] = close[0]
+
+    high = np.maximum(
+        open_price,
+        close
+    ) + 0.0005
+
+    low = np.minimum(
+        open_price,
+        close
+    ) - 0.0005
+
+    df = pd.DataFrame(
+        {
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "close": close,
+            "tick_volume": np.full(
+                BARS,
+                1000
+            ),
+            "spread": np.zeros(BARS),
+            "real_volume": np.zeros(BARS),
+        }
+    )
 
     print(
-        f"Loaded bars: {len(df)}"
+        f"Generated backtest bars: {len(df)}"
     )
 
     # --------------------------------------------------------
