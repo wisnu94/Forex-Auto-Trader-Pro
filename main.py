@@ -21,6 +21,9 @@ from data import (
 from strategy import (
     generate_signal,
 )
+from mtf import (
+    get_mtf_confirmation,
+)
 
 from risk import (
     calculate_sl_tp,
@@ -177,6 +180,52 @@ def analyze_market():
         TIMEFRAME,
         count=300
     )
+    
+    # --------------------------------------------------------
+    # MTF CONFIRMATION
+    # --------------------------------------------------------
+
+    mtf_confirmation = get_mtf_confirmation(
+        SYMBOL,
+        timeframes=("H4", "H1", "M15"),
+        bars=150
+    )
+
+    print()
+    print(
+        "MTF CONFIRMATION"
+    )
+
+    print(
+        f"H4         : "
+        f"{mtf_confirmation['trends']['H4']}"
+    )
+
+    print(
+        f"H1         : "
+        f"{mtf_confirmation['trends']['H1']}"
+    )
+
+    print(
+        f"M15        : "
+        f"{mtf_confirmation['trends']['M15']}"
+    )
+
+    print(
+        f"MTF Score  : "
+        f"{mtf_confirmation['score']}"
+    )
+
+    print(
+        f"MTF Status : "
+        f"{mtf_confirmation['status']}"
+    )
+
+    # --------------------------------------------------------
+    # SIGNAL
+    # --------------------------------------------------------
+
+    signal_result = generate_signal(
 
     # --------------------------------------------------------
     # SIGNAL
@@ -186,7 +235,8 @@ def analyze_market():
         df,
         ema_fast=20,
         ema_slow=50,
-        atr_period=ATR_PERIOD
+        atr_period=ATR_PERIOD,
+        mtf_confirmation=mtf_confirmation
     )
 
     signal = signal_result[
