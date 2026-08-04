@@ -1,5 +1,7 @@
 import time
 
+import MetaTrader5 as mt5
+
 from config import (
     TRADING_MODE,
     SYMBOL,
@@ -22,10 +24,12 @@ from strategy import (
 
 from risk import (
     calculate_sl_tp,
+    calculate_position_size_mt5,
 )
 
 from execution import (
     send_market_order,
+    get_open_positions,
 )
 
 from journal import (
@@ -42,38 +46,115 @@ LOOP_SECONDS = 60
 
 
 # ============================================================
+# MT5 INITIALIZATION
+# ============================================================
+
+def initialize_mt5():
+
+    if not mt5.initialize():
+
+        raise RuntimeError(
+            f"MT5 initialize failed: "
+            f"{mt5.last_error()}"
+        )
+
+
+# ============================================================
+# GET ACCOUNT EQUITY
+# ============================================================
+
+def get_equity():
+
+    initialize_mt5()
+
+    account = mt5.account_info()
+
+    if account is None:
+
+        raise RuntimeError(
+            f"Unable to read account info: "
+            f"{mt5.last_error()}"
+        )
+
+    return float(
+        account.equity
+    )
+
+
+# ============================================================
+# GET BROKER SYMBOL DATA
+# ============================================================
+
+def get_symbol_risk_data(symbol):
+
+    initialize_mt5()
+
+    info = mt5.symbol_info(
+        symbol
+    )
+
+    if info is None:
+
+        raise RuntimeError(
+            f"Symbol not found: {symbol}"
+        )
+
+    if not info.visible:
+
+        if not mt5.symbol_select(
+            symbol,
+            True
+        ):
+
+            raise RuntimeError(
+                f"Cannot activate symbol: {symbol}"
+            )
+
+    return {
+        "tick_size": float(
+            info.trade_tick_size
+        ),
+
+        "tick_value": float(
+            info.trade_tick_value
+        ),
+
+        "volume_min": float(
+            info.volume_min
+        ),
+
+        "volume_max": float(
+            info.volume_max
+        ),
+
+        "volume_step": float(
+            info.volume_step
+        ),
+
+        "digits": int(
+            info.digits
+        ),
+    }
+
+
+# ============================================================
 # ANALYZE MARKET
 # ============================================================
 
 def analyze_market():
 
-    # --------------------------------------------------------
-    # GET MARKET DATA
-    # --------------------------------------------------------
-
-    df = get_bars(
-        SYMBOL,
-        TIMEFRAME,
-        count=300
-    )
-
-    # --------------------------------------------------------
-    # GENERATE SIGNAL
-    # --------------------------------------------------------
-
-    result = generate_signal(
-        df,
-        ema_fast=20,
-        ema_slow=50,
-        atr_period=ATR_PERIOD
-    )
-
-    signal = result["signal"]
-
     print()
-    print("=" * 60)
-    print("FOREX AUTO TRADER PRO")
-    print("=" * 60)
+    print(
+        "=" * 60
+    )
+
+    print(
+        "FOREX AUTO TRADER PRO"
+    )
+
+    print(
+        "=" * 60
+    )
 
     print(
         f"Symbol     : {SYMBOL}"
@@ -87,32 +168,62 @@ def analyze_market():
         f"Mode       : {TRADING_MODE}"
     )
 
+    # --------------------------------------------------------
+    # MARKET DATA
+    # --------------------------------------------------------
+
+    df = get_bars(
+        SYMBOL,
+        TIMEFRAME,
+        count=300
+    )
+
+    # --------------------------------------------------------
+    # SIGNAL
+    # --------------------------------------------------------
+
+    signal_result = generate_signal(
+        df,
+        ema_fast=20,
+        ema_slow=50,
+        atr_period=ATR_PERIOD
+    )
+
+    signal = signal_result[
+        "signal"
+    ]
+
     print(
         f"Signal     : {signal}"
     )
 
     print(
-        f"Trend      : {result['trend']}"
+        f"Trend      : "
+        f"{signal_result['trend']}"
     )
 
     print(
-        f"Structure  : {result['structure']}"
+        f"Structure  : "
+        f"{signal_result['structure']}"
     )
 
     print(
-        f"Momentum   : {result['momentum']}"
+        f"Momentum   : "
+        f"{signal_result['momentum']}"
     )
 
     print(
-        f"Score      : {result['score']}"
+        f"Score      : "
+        f"{signal_result['score']}"
     )
 
     print(
-        f"ATR        : {result['atr']}"
+        f"ATR        : "
+        f"{signal_result['atr']}"
     )
 
     # --------------------------------------------------------
-    # JOURNAL SIGNAL
+    # LOG SIGNAL
     # --------------------------------------------------------
 
     log_signal(
@@ -121,25 +232,55 @@ def analyze_market():
 
         signal=signal,
 
-        score=result["score"],
+        score=signal_result[
+            "score"
+        ],
 
         reason=(
-            f"trend={result['trend']}; "
-            f"structure={result['structure']}; "
-            f"momentum={result['momentum']}"
+            f"trend="
+            f"{signal_result['trend']}; "
+
+            f"structure="
+            f"{signal_result['structure']}; "
+
+            f"momentum="
+            f"{signal_result['momentum']}"
         ),
 
         mode=TRADING_MODE
     )
 
     # --------------------------------------------------------
-    # NO TRADE
+    # HOLD
     # --------------------------------------------------------
 
     if signal == "HOLD":
 
         print(
             "Decision   : HOLD"
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # OPEN POSITION LIMIT
+    # --------------------------------------------------------
+
+    positions = get_open_positions(
+        SYMBOL
+    )
+
+    if len(positions) >= (
+        MAX_OPEN_POSITIONS
+    ):
+
+        print(
+            "Decision   : REJECTED"
+        )
+
+        print(
+            "Reason     : "
+            "Maximum open positions"
         )
 
         return
@@ -174,11 +315,17 @@ def analyze_market():
 
         entry_price=entry,
 
-        atr_value=result["atr"],
+        atr_value=signal_result[
+            "atr"
+        ],
 
-        atr_multiplier=ATR_SL_MULTIPLIER,
+        atr_multiplier=(
+            ATR_SL_MULTIPLIER
+        ),
 
-        reward_risk=REWARD_RISK
+        reward_risk=(
+            REWARD_RISK
+        )
     )
 
     if levels is None:
@@ -188,63 +335,115 @@ def analyze_market():
         )
 
         print(
-            "Reason     : Invalid SL/TP"
+            "Reason     : "
+            "Invalid SL / TP"
         )
 
         return
 
     print(
-        f"Entry      : {levels['entry']}"
+        f"Entry      : "
+        f"{levels['entry']}"
     )
 
     print(
-        f"SL         : {levels['sl']}"
+        f"SL         : "
+        f"{levels['sl']}"
     )
 
     print(
-        f"TP         : {levels['tp']}"
+        f"TP         : "
+        f"{levels['tp']}"
     )
 
     print(
-        f"R:R        : 1:{REWARD_RISK}"
+        f"R:R        : "
+        f"1:{REWARD_RISK}"
     )
 
     # --------------------------------------------------------
-    # OPEN POSITION LIMIT
+    # ACCOUNT EQUITY
     # --------------------------------------------------------
 
-    from execution import (
-        get_open_positions
+    equity = get_equity()
+
+    print(
+        f"Equity     : "
+        f"{equity:.2f}"
     )
 
-    positions = get_open_positions(
+    # --------------------------------------------------------
+    # BROKER RISK DATA
+    # --------------------------------------------------------
+
+    broker = get_symbol_risk_data(
         SYMBOL
     )
 
-    if len(positions) >= MAX_OPEN_POSITIONS:
+    # --------------------------------------------------------
+    # POSITION SIZE
+    # --------------------------------------------------------
+
+    volume = calculate_position_size_mt5(
+
+        equity=equity,
+
+        risk_percent=(
+            RISK_PER_TRADE
+        ),
+
+        entry_price=(
+            levels["entry"]
+        ),
+
+        stop_loss=(
+            levels["sl"]
+        ),
+
+        tick_size=(
+            broker["tick_size"]
+        ),
+
+        tick_value=(
+            broker["tick_value"]
+        ),
+
+        volume_min=(
+            broker["volume_min"]
+        ),
+
+        volume_max=(
+            broker["volume_max"]
+        ),
+
+        volume_step=(
+            broker["volume_step"]
+        )
+    )
+
+    if volume <= 0:
 
         print(
             "Decision   : REJECTED"
         )
 
         print(
-            "Reason     : Max open positions"
+            "Reason     : "
+            "Calculated volume below "
+            "broker minimum"
         )
 
         return
 
-    # --------------------------------------------------------
-    # V1 POSITION SIZE
-    # --------------------------------------------------------
-    #
-    # IMPORTANT:
-    # The exact MT5 tick-value based sizing
-    # will be upgraded in the next Risk Engine.
-    #
-    # For V1 we use a conservative placeholder.
-    #
+    print(
+        f"Volume     : "
+        f"{volume}"
+    )
 
-    volume = 0.01
+    print(
+        f"Risk/trade : "
+        f"{RISK_PER_TRADE * 100:.2f}%"
+    )
 
     # --------------------------------------------------------
     # EXECUTION
@@ -258,17 +457,22 @@ def analyze_market():
 
         volume=volume,
 
-        stop_loss=levels["sl"],
+        stop_loss=(
+            levels["sl"]
+        ),
 
-        take_profit=levels["tp"]
+        take_profit=(
+            levels["tp"]
+        )
     )
 
     print(
-        f"Execution  : {result_order}"
+        f"Execution  : "
+        f"{result_order}"
     )
 
     # --------------------------------------------------------
-    # JOURNAL ORDER
+    # JOURNAL
     # --------------------------------------------------------
 
     log_order(
@@ -288,7 +492,8 @@ def analyze_market():
         mode=TRADING_MODE,
 
         reason=(
-            f"score={result['score']}"
+            f"score="
+            f"{signal_result['score']}"
         )
     )
 
@@ -348,6 +553,7 @@ def main():
             )
 
         print()
+
         print(
             f"Next scan in "
             f"{LOOP_SECONDS} seconds..."
