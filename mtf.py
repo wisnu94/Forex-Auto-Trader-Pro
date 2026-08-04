@@ -1,6 +1,3 @@
-from data import get_bars
-
-
 # ============================================================
 # MTF TREND ENGINE
 # ============================================================
@@ -35,9 +32,17 @@ def timeframe_trend(
         slow_period
     )
 
-    last_close = float(close.iloc[-1])
-    last_fast = float(fast.iloc[-1])
-    last_slow = float(slow.iloc[-1])
+    last_close = float(
+        close.iloc[-1]
+    )
+
+    last_fast = float(
+        fast.iloc[-1]
+    )
+
+    last_slow = float(
+        slow.iloc[-1]
+    )
 
     if (
         last_close > last_fast
@@ -93,6 +98,13 @@ def get_mtf_confirmation(
     timeframes=DEFAULT_TIMEFRAMES,
     bars=150
 ):
+    # MT5 is imported only when real market
+    # data is actually requested.
+    #
+    # This keeps the pure MTF calculation
+    # testable inside GitHub Actions.
+
+    from data import get_bars
 
     trends = {}
 
@@ -112,7 +124,9 @@ def get_mtf_confirmation(
         trends
     )
 
-    requested = list(timeframes)
+    requested = list(
+        timeframes
+    )
 
     all_buy = all(
         trends.get(tf) == "BUY"
