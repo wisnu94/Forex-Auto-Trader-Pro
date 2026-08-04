@@ -166,6 +166,89 @@ def precision_entry_filter(
         return True
 
     return False
+    
+# ============================================================
+# PRECISION SCORE ENGINE
+# ============================================================
+
+def calculate_precision_score(
+    signal,
+    trend,
+    structure,
+    momentum,
+    atr_value,
+    close,
+    ema_fast,
+    mtf_confirmation=None
+):
+
+    score = 0
+
+    # --------------------------------------------------------
+    # MTF ALIGNMENT — 30 POINTS
+    # --------------------------------------------------------
+
+    if mtf_confirmation is not None:
+
+        mtf_status = mtf_confirmation.get(
+            "status",
+            "UNKNOWN"
+        )
+
+        if signal == "BUY" and mtf_status == "STRONG_BUY":
+            score += 30
+
+        elif signal == "SELL" and mtf_status == "STRONG_SELL":
+            score += 30
+
+    # --------------------------------------------------------
+    # TREND — 20 POINTS
+    # --------------------------------------------------------
+
+    if signal == "BUY" and trend == "BULLISH":
+        score += 20
+
+    elif signal == "SELL" and trend == "BEARISH":
+        score += 20
+
+    # --------------------------------------------------------
+    # STRUCTURE — 20 POINTS
+    # --------------------------------------------------------
+
+    if signal == "BUY" and structure == "BULLISH_BREAK":
+        score += 20
+
+    elif signal == "SELL" and structure == "BEARISH_BREAK":
+        score += 20
+
+    # --------------------------------------------------------
+    # MOMENTUM — 15 POINTS
+    # --------------------------------------------------------
+
+    if signal == "BUY" and momentum > 0:
+        score += 15
+
+    elif signal == "SELL" and momentum < 0:
+        score += 15
+
+    # --------------------------------------------------------
+    # PRICE / EMA — 10 POINTS
+    # --------------------------------------------------------
+
+    if signal == "BUY" and close > ema_fast:
+        score += 10
+
+    elif signal == "SELL" and close < ema_fast:
+        score += 10
+
+    # --------------------------------------------------------
+    # ATR VALIDITY — 5 POINTS
+    # --------------------------------------------------------
+
+    if atr_value is not None and atr_value > 0:
+        score += 5
+
+    return min(score, 100)
 
 # ============================================================
 # SIGNAL ENGINE
@@ -306,10 +389,30 @@ def generate_signal(
 
     if signal != "HOLD" and not precision_pass:
         signal = "HOLD"
+        
+    # --------------------------------------------------------
+    # PRECISION SCORE
+    # --------------------------------------------------------
+
+    precision_score = calculate_precision_score(
+        signal=signal,
+        trend=trend,
+        structure=structure,
+        momentum=momentum,
+        atr_value=(
+            float(atr_value)
+            if pd.notna(atr_value)
+            else None
+        ),
+        close=float(last["close"]),
+        ema_fast=float(last["ema_fast"]),
+        mtf_confirmation=mtf_confirmation
+    )
 
     return {
         "signal": signal,
         "precision_pass": precision_pass,
+        "precision_score": precision_score,
         "mtf_status": (
             mtf_confirmation["status"]
             if mtf_confirmation is not None
