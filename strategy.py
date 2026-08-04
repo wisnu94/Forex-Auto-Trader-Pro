@@ -114,6 +114,58 @@ def calculate_momentum(df):
 
     return float(momentum)
 
+# ============================================================
+# PRECISION ENTRY FILTER
+# ============================================================
+
+def precision_entry_filter(
+    signal,
+    trend,
+    structure,
+    momentum,
+    atr_value,
+    close,
+    ema_fast
+):
+    if signal == "BUY":
+
+        if trend != "BULLISH":
+            return False
+
+        if structure != "BULLISH_BREAK":
+            return False
+
+        if momentum <= 0:
+            return False
+
+        if close <= ema_fast:
+            return False
+
+        if atr_value is None or atr_value <= 0:
+            return False
+
+        return True
+
+    if signal == "SELL":
+
+        if trend != "BEARISH":
+            return False
+
+        if structure != "BEARISH_BREAK":
+            return False
+
+        if momentum >= 0:
+            return False
+
+        if close >= ema_fast:
+            return False
+
+        if atr_value is None or atr_value <= 0:
+            return False
+
+        return True
+
+    return False
 
 # ============================================================
 # SIGNAL ENGINE
@@ -233,9 +285,31 @@ def generate_signal(
                 mtf_confirmation
             ):
                 signal = "HOLD"
+                
+    # --------------------------------------------------------
+    # PRECISION ENTRY FILTER
+    # --------------------------------------------------------
+
+    precision_pass = precision_entry_filter(
+        signal=signal,
+        trend=trend,
+        structure=structure,
+        momentum=momentum,
+        atr_value=(
+            float(atr_value)
+            if pd.notna(atr_value)
+            else None
+        ),
+        close=float(last["close"]),
+        ema_fast=float(last["ema_fast"])
+    )
+
+    if signal != "HOLD" and not precision_pass:
+        signal = "HOLD"
 
     return {
         "signal": signal,
+        "precision_pass": precision_pass,
         "mtf_status": (
             mtf_confirmation["status"]
             if mtf_confirmation is not None
