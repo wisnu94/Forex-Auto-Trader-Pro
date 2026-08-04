@@ -99,6 +99,55 @@ def main():
 
         min_score=MIN_SCORE
     )
+    
+    # --------------------------------------------------------
+    # BACKTEST VALIDATION
+    # --------------------------------------------------------
+
+    if result["total_trades"] == 0:
+
+        print()
+        print("⚠️ BACKTEST VALIDATION")
+        print("-" * 60)
+        print("No valid trades were generated.")
+        print(
+            "Do NOT optimize the strategy yet."
+        )
+        print(
+            "Reason: the current backtest filter "
+            "may be too restrictive."
+        )
+
+    else:
+
+        print()
+        print("✅ BACKTEST VALIDATION")
+        print("-" * 60)
+
+        print(
+            f"Trades       : "
+            f"{result['total_trades']}"
+        )
+
+        print(
+            f"Win Rate     : "
+            f"{result['win_rate']}%"
+        )
+
+        print(
+            f"Profit Factor: "
+            f"{result['profit_factor']}"
+        )
+
+        print(
+            f"Net R        : "
+            f"{result['net_r']}"
+        )
+
+        print(
+            f"Expectancy R : "
+            f"{result['expectancy_r']}"
+        )
 
     # --------------------------------------------------------
     # SUMMARY
