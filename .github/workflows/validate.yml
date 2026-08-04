@@ -118,7 +118,6 @@ jobs:
       - name: Run backtest
         run: |
           python run_backtest.py
-        run: |
           python - <<'PY'
 
           import pandas as pd
