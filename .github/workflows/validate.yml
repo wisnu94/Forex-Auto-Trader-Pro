@@ -1,0 +1,153 @@
+name: Forex Auto Trader Pro - Validation
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ======================================================
+      # CHECKOUT
+      # ======================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ======================================================
+      # PYTHON
+      # ======================================================
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ======================================================
+      # INSTALL DEPENDENCIES
+      # ======================================================
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ======================================================
+      # COMPILE CHECK
+      # ======================================================
+
+      - name: Compile Python files
+        run: |
+          python -m compileall -q .
+
+      # ======================================================
+      # IMPORT CHECK
+      # ======================================================
+
+      - name: Import core modules
+        run: |
+          python -c "import config"
+          python -c "import strategy"
+          python -c "import risk"
+          python -c "import journal"
+
+      # ======================================================
+      # BASIC STRATEGY TEST
+      # ======================================================
+
+      - name: Strategy smoke test
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          import numpy as np
+
+          from strategy import generate_signal
+
+          rows = 150
+
+          close = np.linspace(
+              1.0800,
+              1.1200,
+              rows
+          )
+
+          df = pd.DataFrame({
+              "open": close,
+              "high": close + 0.0010,
+              "low": close - 0.0010,
+              "close": close,
+              "tick_volume": np.ones(rows) * 1000,
+              "spread": np.zeros(rows),
+              "real_volume": np.zeros(rows),
+          })
+
+          result = generate_signal(
+              df,
+              ema_fast=20,
+              ema_slow=50,
+              atr_period=14
+          )
+
+          assert "signal" in result
+          assert result["signal"] in {
+              "BUY",
+              "SELL",
+              "HOLD"
+          }
+
+          print("Strategy smoke test: PASS")
+          print(result)
+          PY
+
+      # ======================================================
+      # RISK ENGINE TEST
+      # ======================================================
+
+      - name: Risk engine test
+        run: |
+          python - <<'PY'
+
+          from risk import (
+              calculate_sl_tp,
+              calculate_position_size_mt5
+          )
+
+          levels = calculate_sl_tp(
+              signal="BUY",
+              entry_price=1.1000,
+              atr_value=0.0010,
+              atr_multiplier=1.5,
+              reward_risk=2.0
+          )
+
+          assert levels is not None
+          assert levels["sl"] < levels["entry"]
+          assert levels["tp"] > levels["entry"]
+
+          volume = calculate_position_size_mt5(
+              equity=10000,
+              risk_percent=0.005,
+              entry_price=1.1000,
+              stop_loss=1.0985,
+              tick_size=0.00001,
+              tick_value=1.0,
+              volume_min=0.01,
+              volume_max=100.0,
+              volume_step=0.01
+          )
+
+          assert volume >= 0
+
+          print("Risk engine test: PASS")
+          print("SL:", levels["sl"])
+          print("TP:", levels["tp"])
+          print("Volume:", volume)
+
+          PY
