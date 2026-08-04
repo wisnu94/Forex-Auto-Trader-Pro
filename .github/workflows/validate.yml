@@ -115,6 +115,9 @@ jobs:
       # ======================================================
 
       - name: MTF engine test
+      - name: Run backtest
+        run: |
+          python run_backtest.py
         run: |
           python - <<'PY'
 
