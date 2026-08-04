@@ -1,6 +1,12 @@
 import pandas as pd
 import numpy as np
 
+def create_backtest_data(bars=500):
+
+    df = create_backtest_data(
+        bars=BARS
+    )
+
 from backtest import (
     backtest_strategy,
     analyze_grades,
@@ -11,9 +17,6 @@ from config import (
     SYMBOL,
     TIMEFRAME,
 )
-
-from data import get_bars
-
 
 # ============================================================
 # BACKTEST SETTINGS
