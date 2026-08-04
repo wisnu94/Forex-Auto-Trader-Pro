@@ -115,10 +115,12 @@ jobs:
       # ======================================================
 
       - name: MTF engine test
-      - name: Run backtest
         run: |
           python run_backtest.py
           python - <<'PY'
+      - name: Run backtest
+        run: |
+          python run_backtest.py
 
           import pandas as pd
           import numpy as np
