@@ -57,6 +57,8 @@ jobs:
           python -c "import strategy"
           python -c "import risk"
           python -c "import journal"
+          python -c "import mtf"
+          python -c "import backtest"
 
       # ======================================================
       # BASIC STRATEGY TEST
@@ -96,6 +98,7 @@ jobs:
           )
 
           assert "signal" in result
+
           assert result["signal"] in {
               "BUY",
               "SELL",
@@ -107,26 +110,15 @@ jobs:
           PY
 
       # ======================================================
-      # RISK ENGINE TEST
-      # ======================================================
-
-      # ======================================================
       # MTF ENGINE TEST
       # ======================================================
 
       - name: MTF engine test
         run: |
-          python run_backtest.py
           python - <<'PY'
-      - name: Run backtest
-        run: |
-          python run_backtest.py
-
           import pandas as pd
           import numpy as np
-
           import mtf
-
 
           # --------------------------------------------------
           # CREATE SYNTHETIC BULLISH DATA
@@ -150,7 +142,6 @@ jobs:
               "real_volume": np.zeros(rows),
           })
 
-
           # --------------------------------------------------
           # TEST TREND DETECTION
           # --------------------------------------------------
@@ -163,10 +154,7 @@ jobs:
 
           assert trend == "BUY"
 
-          print(
-              "MTF trend detection: PASS"
-          )
-
+          print("MTF trend detection: PASS")
 
           # --------------------------------------------------
           # TEST SCORE
@@ -184,15 +172,8 @@ jobs:
 
           assert score == 100
 
-          print(
-              "MTF score test: PASS"
-          )
-
-          print(
-              "Score:",
-              score
-          )
-
+          print("MTF score test: PASS")
+          print("Score:", score)
 
           # --------------------------------------------------
           # TEST CONFIRMATION STATUS
@@ -214,23 +195,27 @@ jobs:
               confirmation
           )
 
-          print(
-              "MTF signal filter: PASS"
-          )
-
+          print("MTF signal filter: PASS")
 
           print()
-          print(
-              "MTF ENGINE TEST: PASS"
-          )
-
+          print("MTF ENGINE TEST: PASS")
           PY
-          python - <<'PY'
 
+      # ======================================================
+      # RISK ENGINE TEST
+      # ======================================================
+
+      - name: Risk engine test
+        run: |
+          python - <<'PY'
           from risk import (
               calculate_sl_tp,
               calculate_position_size_mt5
           )
+
+          # --------------------------------------------------
+          # TEST SL / TP
+          # --------------------------------------------------
 
           levels = calculate_sl_tp(
               signal="BUY",
@@ -241,8 +226,14 @@ jobs:
           )
 
           assert levels is not None
+
           assert levels["sl"] < levels["entry"]
+
           assert levels["tp"] > levels["entry"]
+
+          # --------------------------------------------------
+          # TEST POSITION SIZE
+          # --------------------------------------------------
 
           volume = calculate_position_size_mt5(
               equity=10000,
@@ -262,5 +253,12 @@ jobs:
           print("SL:", levels["sl"])
           print("TP:", levels["tp"])
           print("Volume:", volume)
-
           PY
+
+      # ======================================================
+      # BACKTEST ENGINE
+      # ======================================================
+
+      - name: Run backtest
+        run: |
+          python run_backtest.py
