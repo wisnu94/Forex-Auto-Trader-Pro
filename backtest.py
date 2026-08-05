@@ -286,16 +286,12 @@ def backtest_strategy(
         # ATR
         # ----------------------------------------------------
 
-        atr = result.get(
-            "atr"
-        )
+        atr = result.get("atr")
 
         if atr is None:
             continue
 
-        if not np.isfinite(
-            float(atr)
-        ):
+        if not np.isfinite(float(atr)):
             continue
 
         if float(atr) <= 0:
@@ -394,7 +390,6 @@ def backtest_strategy(
                     outcome = "LOSS"
                     exit_price = stop_loss
                     exit_index = j
-
                     break
 
                 if hit_sl:
@@ -402,7 +397,6 @@ def backtest_strategy(
                     outcome = "LOSS"
                     exit_price = stop_loss
                     exit_index = j
-
                     break
 
                 if hit_tp:
@@ -410,7 +404,6 @@ def backtest_strategy(
                     outcome = "WIN"
                     exit_price = take_profit
                     exit_index = j
-
                     break
 
             # ------------------------------------------------
@@ -434,7 +427,6 @@ def backtest_strategy(
                     outcome = "LOSS"
                     exit_price = stop_loss
                     exit_index = j
-
                     break
 
                 if hit_sl:
@@ -442,7 +434,6 @@ def backtest_strategy(
                     outcome = "LOSS"
                     exit_price = stop_loss
                     exit_index = j
-
                     break
 
                 if hit_tp:
@@ -450,7 +441,6 @@ def backtest_strategy(
                     outcome = "WIN"
                     exit_price = take_profit
                     exit_index = j
-
                     break
 
         # ----------------------------------------------------
@@ -465,13 +455,8 @@ def backtest_strategy(
         # ----------------------------------------------------
 
         if outcome == "WIN":
-
-            r_multiple = float(
-                reward_risk
-            )
-
+            r_multiple = float(reward_risk)
         else:
-
             r_multiple = -1.0
 
         # ----------------------------------------------------
@@ -481,73 +466,45 @@ def backtest_strategy(
         trades.append(
             {
                 "index": i,
-
                 "entry_index": entry_index,
-
                 "exit_index": exit_index,
-
                 "signal": signal,
-
                 "entry": entry,
-
                 "stop_loss": stop_loss,
-
                 "take_profit": take_profit,
-
                 "exit": exit_price,
-
                 "outcome": outcome,
-
                 "r_multiple": r_multiple,
-
-                "precision_score": (
-                    precision_score
-                ),
-
-                "precision_grade": (
-                    precision_grade
-                ),
-
-                "precision_pass": (
-                    precision_pass
-                ),
+                "precision_score": precision_score,
+                "precision_grade": precision_grade,
+                "precision_pass": precision_pass,
 
                 # MTF diagnostics
-                "mtf_score": (
-                    mtf_confirmation[
-                        "score"
-                    ]
+                "mtf_score": mtf_confirmation[
+                    "score"
+                ],
+
+                "mtf_status": mtf_status,
+
+                "mtf_h4": mtf_confirmation[
+                    "trends"
+                ].get(
+                    "H4",
+                    "HOLD"
                 ),
 
-                "mtf_status": (
-                    mtf_status
+                "mtf_h1": mtf_confirmation[
+                    "trends"
+                ].get(
+                    "H1",
+                    "HOLD"
                 ),
 
-                "mtf_h4": (
-                    mtf_confirmation[
-                        "trends"
-                    ].get(
-                        "H4",
-                        "HOLD"
-                    )
-                ),
-
-                "mtf_h1": (
-                    mtf_confirmation[
-                        "trends"
-                    ].get(
-                        "H1",
-                        "HOLD"
-                    )
-                ),
-
-                "mtf_m15": (
-                    mtf_confirmation[
-                        "trends"
-                    ].get(
-                        "M15",
-                        "HOLD"
-                    )
+                "mtf_m15": mtf_confirmation[
+                    "trends"
+                ].get(
+                    "M15",
+                    "HOLD"
                 ),
             }
         )
@@ -650,11 +607,8 @@ def backtest_strategy(
 
     return {
         "trades": trades,
-
         "total_trades": total,
-
         "wins": wins,
-
         "losses": losses,
 
         "win_rate": round(
@@ -667,8 +621,7 @@ def backtest_strategy(
                 profit_factor,
                 3
             )
-            if profit_factor
-            != float("inf")
+            if profit_factor != float("inf")
             else profit_factor
         ),
 
@@ -718,9 +671,7 @@ def analyze_grades(trades):
             if trade["outcome"] == "WIN"
         )
 
-        losses = (
-            total - wins
-        )
+        losses = total - wins
 
         net_r = sum(
             trade["r_multiple"]
@@ -738,18 +689,13 @@ def analyze_grades(trades):
         )
 
         result[grade] = {
-
             "trades": total,
-
             "wins": wins,
-
             "losses": losses,
-
             "win_rate": round(
                 win_rate,
                 2
             ),
-
             "net_r": round(
                 net_r,
                 3
@@ -764,17 +710,63 @@ def analyze_grades(trades):
 # ============================================================
 
 def analyze_signals(trades):
-    
+
+    result = {}
+
+    for signal in [
+        "BUY",
+        "SELL",
+    ]:
+
+        subset = [
+            trade
+            for trade in trades
+            if trade.get(
+                "signal"
+            ) == signal
+        ]
+
+        total = len(subset)
+
+        wins = sum(
+            1
+            for trade in subset
+            if trade["outcome"] == "WIN"
+        )
+
+        losses = total - wins
+
+        net_r = sum(
+            trade["r_multiple"]
+            for trade in subset
+        )
+
+        win_rate = (
+            (
+                wins
+                / total
+            )
+            * 100
+            if total > 0
+            else 0.0
+        )
+
         result[signal] = {
             "trades": total,
             "wins": wins,
+            "losses": losses,
             "win_rate": round(
                 win_rate,
                 2
             ),
+            "net_r": round(
+                net_r,
+                3
+            ),
         }
 
     return result
+
 
 # ============================================================
 # MTF DIAGNOSTIC ANALYSIS
@@ -798,9 +790,7 @@ def analyze_mtf(trades):
         subset = [
             trade
             for trade in trades
-            if trade.get(
-                "signal"
-            ) == direction
+            if trade.get("signal") == direction
             and trade.get(
                 f"mtf_{timeframe.lower()}"
             ) == direction
@@ -811,17 +801,13 @@ def analyze_mtf(trades):
         wins = sum(
             1
             for trade in subset
-            if trade.get(
-                "outcome"
-            ) == "WIN"
+            if trade.get("outcome") == "WIN"
         )
 
         losses = sum(
             1
             for trade in subset
-            if trade.get(
-                "outcome"
-            ) == "LOSS"
+            if trade.get("outcome") == "LOSS"
         )
 
         win_rate = (
@@ -860,69 +846,6 @@ def analyze_mtf(trades):
 
     return result
 
-    result = {}
-
-    for signal in [
-        "BUY",
-        "SELL",
-    ]:
-
-        subset = [
-            trade
-            for trade in trades
-            if trade.get(
-                "signal"
-            ) == signal
-        ]
-
-        total = len(subset)
-
-        wins = sum(
-            1
-            for trade in subset
-            if trade["outcome"] == "WIN"
-        )
-
-        losses = (
-            total - wins
-        )
-
-        net_r = sum(
-            trade["r_multiple"]
-            for trade in subset
-        )
-
-        win_rate = (
-            (
-                wins
-                / total
-            )
-            * 100
-            if total > 0
-            else 0.0
-        )
-
-        result[signal] = {
-
-            "trades": total,
-
-            "wins": wins,
-
-            "losses": losses,
-
-            "win_rate": round(
-                win_rate,
-                2
-            ),
-
-            "net_r": round(
-                net_r,
-                3
-            ),
-        }
-
-    return result
-
 
 # ============================================================
 # DIAGNOSTIC: SCORE BUCKET
@@ -947,21 +870,21 @@ def analyze_score_buckets(trades):
 
         if 70 <= score < 80:
 
-            buckets[
-                "70-79"
-            ].append(trade)
+            buckets["70-79"].append(
+                trade
+            )
 
         elif 80 <= score < 90:
 
-            buckets[
-                "80-89"
-            ].append(trade)
+            buckets["80-89"].append(
+                trade
+            )
 
         elif score >= 90:
 
-            buckets[
-                "90-100"
-            ].append(trade)
+            buckets["90-100"].append(
+                trade
+            )
 
     result = {}
 
@@ -991,18 +914,13 @@ def analyze_score_buckets(trades):
         )
 
         result[bucket] = {
-
             "trades": total,
-
             "wins": wins,
-
             "losses": total - wins,
-
             "win_rate": round(
                 win_rate,
                 2
             ),
-
             "net_r": round(
                 net_r,
                 3
@@ -1062,18 +980,13 @@ def analyze_mtf_status(trades):
         )
 
         result[status] = {
-
             "trades": total,
-
             "wins": wins,
-
             "losses": total - wins,
-
             "win_rate": round(
                 win_rate,
                 2
             ),
-
             "net_r": round(
                 net_r,
                 3
@@ -1111,51 +1024,51 @@ def analyze_mtf_scores(trades):
 
         if score >= 60:
 
-            buckets[
-                "60_to_100"
-            ].append(trade)
+            buckets["60_to_100"].append(
+                trade
+            )
 
         elif score >= 40:
 
-            buckets[
-                "40_to_59"
-            ].append(trade)
+            buckets["40_to_59"].append(
+                trade
+            )
 
         elif score >= 20:
 
-            buckets[
-                "20_to_39"
-            ].append(trade)
+            buckets["20_to_39"].append(
+                trade
+            )
 
         elif score >= 0:
 
-            buckets[
-                "0_to_19"
-            ].append(trade)
+            buckets["0_to_19"].append(
+                trade
+            )
 
         elif score >= -19:
 
-            buckets[
-                "-19_to_-1"
-            ].append(trade)
+            buckets["-19_to_-1"].append(
+                trade
+            )
 
         elif score >= -39:
 
-            buckets[
-                "-39_to_-20"
-            ].append(trade)
+            buckets["-39_to_-20"].append(
+                trade
+            )
 
         elif score >= -59:
 
-            buckets[
-                "-59_to_-40"
-            ].append(trade)
+            buckets["-59_to_-40"].append(
+                trade
+            )
 
         else:
 
-            buckets[
-                "-100_to_-60"
-            ].append(trade)
+            buckets["-100_to_-60"].append(
+                trade
+            )
 
     result = {}
 
@@ -1185,18 +1098,13 @@ def analyze_mtf_scores(trades):
         )
 
         result[bucket] = {
-
             "trades": total,
-
             "wins": wins,
-
             "losses": total - wins,
-
             "win_rate": round(
                 win_rate,
                 2
             ),
-
             "net_r": round(
                 net_r,
                 3
@@ -1261,7 +1169,6 @@ def analyze_diagnostics(trades):
     )
 
     return {
-
         "total_trades": total,
 
         "wins": wins,
@@ -1298,6 +1205,10 @@ def analyze_diagnostics(trades):
         ),
 
         "signals": analyze_signals(
+            trades
+        ),
+
+        "mtf": analyze_mtf(
             trades
         ),
 
