@@ -102,8 +102,8 @@ def calculate_momentum(df):
     if len(df) < 5:
         return 0.0
 
-    current = df["close"].iloc[-1]
-    previous = df["close"].iloc[-5]
+    current = float(df["close"].iloc[-1])
+    previous = float(df["close"].iloc[-5])
 
     if previous == 0:
         return 0.0
@@ -117,7 +117,7 @@ def calculate_momentum(df):
 
 
 # ============================================================
-# PRECISION ENTRY FILTER V3
+# PRECISION ENTRY FILTER V2
 # ============================================================
 
 def precision_entry_filter(
@@ -129,190 +129,66 @@ def precision_entry_filter(
     close,
     ema_fast,
     ema_slow,
-    candle_open=None,
-    candle_high=None,
-    candle_low=None,
-    overextension_atr=1.50,
+    breakout_strength=0.0,
+    ema_separation=0.0
 ):
-
-    # --------------------------------------------------------
-    # BASIC VALIDATION
-    # --------------------------------------------------------
-
-    if signal not in {
-        "BUY",
-        "SELL"
-    }:
-        return False
-
-    if atr_value is None:
-        return False
-
-    if not np.isfinite(
-        float(atr_value)
-    ):
-        return False
-
-    if float(atr_value) <= 0:
-        return False
-
-    # --------------------------------------------------------
-    # EMA VALIDATION
-    # --------------------------------------------------------
-
-    if not np.isfinite(
-        float(ema_fast)
-    ):
-        return False
-
-    if not np.isfinite(
-        float(ema_slow)
-    ):
-        return False
-
-    # --------------------------------------------------------
-    # BUY
-    # --------------------------------------------------------
 
     if signal == "BUY":
 
-        # Trend wajib bullish
         if trend != "BULLISH":
             return False
 
-        # Struktur wajib breakout bullish
         if structure != "BULLISH_BREAK":
             return False
 
-        # Momentum wajib positif
         if momentum <= 0:
             return False
 
-        # Harga wajib di atas EMA fast
         if close <= ema_fast:
             return False
 
-        # EMA fast wajib di atas EMA slow
         if ema_fast <= ema_slow:
             return False
 
-        # ----------------------------------------------------
-        # OVEREXTENSION FILTER
-        # ----------------------------------------------------
-
-        distance_from_ema = (
-            close - ema_fast
-        )
-
-        if distance_from_ema > (
-            atr_value
-            * overextension_atr
-        ):
+        if atr_value is None or atr_value <= 0:
             return False
 
-        # ----------------------------------------------------
-        # CANDLE QUALITY
-        # ----------------------------------------------------
+        # Breakout harus cukup kuat dibanding ATR
+        if breakout_strength < 0.15:
+            return False
 
-        if (
-            candle_open is not None
-            and candle_high is not None
-            and candle_low is not None
-        ):
-
-            candle_range = (
-                candle_high
-                - candle_low
-            )
-
-            if candle_range > 0:
-
-                candle_body = abs(
-                    close
-                    - candle_open
-                )
-
-                body_ratio = (
-                    candle_body
-                    / candle_range
-                )
-
-                # Breakout candle harus
-                # memiliki body yang cukup kuat
-                if body_ratio < 0.35:
-                    return False
+        # EMA harus memiliki separation minimum
+        if ema_separation < 0.05:
+            return False
 
         return True
 
-    # --------------------------------------------------------
-    # SELL
-    # --------------------------------------------------------
-
     if signal == "SELL":
 
-        # Trend wajib bearish
         if trend != "BEARISH":
             return False
 
-        # Struktur wajib breakout bearish
         if structure != "BEARISH_BREAK":
             return False
 
-        # Momentum wajib negatif
         if momentum >= 0:
             return False
 
-        # Harga wajib di bawah EMA fast
         if close >= ema_fast:
             return False
 
-        # EMA fast wajib di bawah EMA slow
         if ema_fast >= ema_slow:
             return False
 
-        # ----------------------------------------------------
-        # OVEREXTENSION FILTER
-        # ----------------------------------------------------
-
-        distance_from_ema = (
-            ema_fast - close
-        )
-
-        if distance_from_ema > (
-            atr_value
-            * overextension_atr
-        ):
+        if atr_value is None or atr_value <= 0:
             return False
 
-        # ----------------------------------------------------
-        # CANDLE QUALITY
-        # ----------------------------------------------------
+        # SELL dibuat lebih ketat
+        if breakout_strength < 0.20:
+            return False
 
-        if (
-            candle_open is not None
-            and candle_high is not None
-            and candle_low is not None
-        ):
-
-            candle_range = (
-                candle_high
-                - candle_low
-            )
-
-            if candle_range > 0:
-
-                candle_body = abs(
-                    close
-                    - candle_open
-                )
-
-                body_ratio = (
-                    candle_body
-                    / candle_range
-                )
-
-                if body_ratio < 0.35:
-                    return False
+        if ema_separation < 0.08:
+            return False
 
         return True
 
@@ -320,7 +196,7 @@ def precision_entry_filter(
 
 
 # ============================================================
-# PRECISION SCORE ENGINE
+# PRECISION SCORE ENGINE V2
 # ============================================================
 
 def calculate_precision_score(
@@ -331,13 +207,16 @@ def calculate_precision_score(
     atr_value,
     close,
     ema_fast,
-    mtf_confirmation=None,
+    ema_slow,
+    breakout_strength=0.0,
+    ema_separation=0.0,
+    mtf_confirmation=None
 ):
 
     score = 0
 
     # --------------------------------------------------------
-    # MTF — 30 POINTS
+    # MTF — 25 POINTS
     # --------------------------------------------------------
 
     if mtf_confirmation is not None:
@@ -347,103 +226,81 @@ def calculate_precision_score(
             "UNKNOWN"
         )
 
-        if (
-            signal == "BUY"
-            and mtf_status == "STRONG_BUY"
-        ):
-            score += 30
+        if signal == "BUY" and mtf_status == "STRONG_BUY":
+            score += 25
 
-        elif (
-            signal == "SELL"
-            and mtf_status == "STRONG_SELL"
-        ):
-            score += 30
+        elif signal == "SELL" and mtf_status == "STRONG_SELL":
+            score += 25
 
     # --------------------------------------------------------
     # TREND — 20 POINTS
     # --------------------------------------------------------
 
-    if (
-        signal == "BUY"
-        and trend == "BULLISH"
-    ):
+    if signal == "BUY" and trend == "BULLISH":
         score += 20
 
-    elif (
-        signal == "SELL"
-        and trend == "BEARISH"
-    ):
+    elif signal == "SELL" and trend == "BEARISH":
         score += 20
 
     # --------------------------------------------------------
     # STRUCTURE — 20 POINTS
     # --------------------------------------------------------
 
-    if (
-        signal == "BUY"
-        and structure == "BULLISH_BREAK"
-    ):
+    if signal == "BUY" and structure == "BULLISH_BREAK":
         score += 20
 
-    elif (
-        signal == "SELL"
-        and structure == "BEARISH_BREAK"
-    ):
+    elif signal == "SELL" and structure == "BEARISH_BREAK":
         score += 20
 
     # --------------------------------------------------------
     # MOMENTUM — 15 POINTS
     # --------------------------------------------------------
 
-    if (
-        signal == "BUY"
-        and momentum > 0
-    ):
+    if signal == "BUY" and momentum > 0:
         score += 15
 
-    elif (
-        signal == "SELL"
-        and momentum < 0
-    ):
+    elif signal == "SELL" and momentum < 0:
         score += 15
 
     # --------------------------------------------------------
     # PRICE / EMA — 10 POINTS
     # --------------------------------------------------------
 
-    if (
-        signal == "BUY"
-        and close > ema_fast
-    ):
+    if signal == "BUY" and close > ema_fast:
         score += 10
 
-    elif (
-        signal == "SELL"
-        and close < ema_fast
-    ):
+    elif signal == "SELL" and close < ema_fast:
         score += 10
 
     # --------------------------------------------------------
-    # ATR — 5 POINTS
+    # BREAKOUT STRENGTH — 5 POINTS
     # --------------------------------------------------------
 
-    if (
-        atr_value is not None
-        and np.isfinite(
-            float(atr_value)
-        )
-        and atr_value > 0
-    ):
+    if breakout_strength >= 0.20:
         score += 5
 
-    return min(
-        score,
-        100
-    )
+    # --------------------------------------------------------
+    # EMA SEPARATION — 5 POINTS
+    # --------------------------------------------------------
+
+    if ema_separation >= 0.10:
+        score += 5
+
+    # --------------------------------------------------------
+    # ATR VALIDITY
+    # --------------------------------------------------------
+
+    # ATR tetap wajib valid, tetapi tidak menjadi poin utama.
+    # Ini mencegah score tinggi hanya karena ATR tersedia.
+
+    if atr_value is None or atr_value <= 0:
+        return 0
+
+    return min(score, 100)
 
 
 # ============================================================
-# PRECISION GRADE ENGINE
+# PRECISION GRADE ENGINE V2
 # ============================================================
 
 def get_precision_grade(score):
@@ -470,7 +327,7 @@ def get_precision_grade(score):
 def get_precision_decision(
     signal,
     score,
-    precision_pass,
+    precision_pass
 ):
 
     if not precision_pass:
@@ -512,7 +369,7 @@ def generate_signal(
     ema_fast=20,
     ema_slow=50,
     atr_period=14,
-    mtf_confirmation=None,
+    mtf_confirmation=None
 ):
 
     minimum_bars = max(
@@ -520,7 +377,7 @@ def generate_signal(
         atr_period + 10
     )
 
-    if len(df) < minimum_bars:
+    if df is None or len(df) < minimum_bars:
 
         return {
             "signal": "HOLD",
@@ -535,7 +392,7 @@ def generate_signal(
             "atr": None,
             "buy_score": 0,
             "sell_score": 0,
-            "score": 0,
+            "score": 0
         }
 
     data = df.copy()
@@ -563,15 +420,75 @@ def generate_signal(
         ema_slow
     )
 
-    structure = detect_structure(
-        data
+    structure = detect_structure(data)
+
+    momentum = calculate_momentum(data)
+
+    atr_value = (
+        float(last["atr"])
+        if pd.notna(last["atr"])
+        else None
     )
 
-    momentum = calculate_momentum(
-        data
-    )
+    close = float(last["close"])
+    ema_fast_value = float(last["ema_fast"])
+    ema_slow_value = float(last["ema_slow"])
 
-    atr_value = last["atr"]
+    # ========================================================
+    # BREAKOUT STRENGTH
+    # ========================================================
+
+    if atr_value is not None and atr_value > 0:
+
+        if structure == "BULLISH_BREAK":
+
+            previous_high = data["high"].iloc[-5:-1].max()
+
+            breakout_distance = (
+                close - previous_high
+            )
+
+            breakout_strength = (
+                breakout_distance / atr_value
+            )
+
+        elif structure == "BEARISH_BREAK":
+
+            previous_low = data["low"].iloc[-5:-1].min()
+
+            breakout_distance = (
+                previous_low - close
+            )
+
+            breakout_strength = (
+                breakout_distance / atr_value
+            )
+
+        else:
+
+            breakout_strength = 0.0
+
+    else:
+
+        breakout_strength = 0.0
+
+    # ========================================================
+    # EMA SEPARATION
+    # ========================================================
+
+    if atr_value is not None and atr_value > 0:
+
+        ema_separation = (
+            abs(
+                ema_fast_value
+                - ema_slow_value
+            )
+            / atr_value
+        )
+
+    else:
+
+        ema_separation = 0.0
 
     # ========================================================
     # BASE SIGNAL SCORE
@@ -580,50 +497,40 @@ def generate_signal(
     buy_score = 0
     sell_score = 0
 
-    # Trend
     if trend == "BULLISH":
         buy_score += 30
 
     elif trend == "BEARISH":
         sell_score += 30
 
-    # Structure
     if structure == "BULLISH_BREAK":
         buy_score += 30
 
     elif structure == "BEARISH_BREAK":
         sell_score += 30
 
-    # Momentum
     if momentum > 0:
         buy_score += 20
 
     elif momentum < 0:
         sell_score += 20
 
-    # Price location
-    if last["close"] > last["ema_fast"]:
+    if close > ema_fast_value:
         buy_score += 20
 
-    elif last["close"] < last["ema_fast"]:
+    elif close < ema_fast_value:
         sell_score += 20
 
     # ========================================================
-    # BASE SIGNAL
+    # INITIAL SIGNAL
     # ========================================================
 
     signal = "HOLD"
 
-    if (
-        buy_score >= 70
-        and buy_score > sell_score
-    ):
+    if buy_score >= 70 and buy_score > sell_score:
         signal = "BUY"
 
-    elif (
-        sell_score >= 70
-        and sell_score > buy_score
-    ):
+    elif sell_score >= 70 and sell_score > buy_score:
         signal = "SELL"
 
     # ========================================================
@@ -631,130 +538,89 @@ def generate_signal(
     # ========================================================
 
     if (
-        mtf_confirmation is not None
-        and signal != "HOLD"
+        signal != "HOLD"
+        and mtf_confirmation is not None
     ):
 
         if not mtf_allows_signal(
             signal,
             mtf_confirmation
         ):
+
             signal = "HOLD"
 
     # ========================================================
-    # PRECISION FILTER V3
+    # PRECISION FILTER
     # ========================================================
-
-    atr_numeric = (
-        float(atr_value)
-        if pd.notna(atr_value)
-        else None
-    )
 
     precision_pass = False
 
     if signal != "HOLD":
 
-        precision_pass = (
-            precision_entry_filter(
-                signal=signal,
-                trend=trend,
-                structure=structure,
-                momentum=momentum,
-                atr_value=atr_numeric,
-                close=float(
-                    last["close"]
-                ),
-                ema_fast=float(
-                    last["ema_fast"]
-                ),
-                ema_slow=float(
-                    last["ema_slow"]
-                ),
-                candle_open=float(
-                    last["open"]
-                )
-                if "open" in last
-                else None,
-                candle_high=float(
-                    last["high"]
-                )
-                if "high" in last
-                else None,
-                candle_low=float(
-                    last["low"]
-                )
-                if "low" in last
-                else None,
-                overextension_atr=1.50,
-            )
+        precision_pass = precision_entry_filter(
+            signal=signal,
+            trend=trend,
+            structure=structure,
+            momentum=momentum,
+            atr_value=atr_value,
+            close=close,
+            ema_fast=ema_fast_value,
+            ema_slow=ema_slow_value,
+            breakout_strength=breakout_strength,
+            ema_separation=ema_separation
         )
 
-    if (
-        signal != "HOLD"
-        and not precision_pass
-    ):
-        signal = "HOLD"
+        if not precision_pass:
+            signal = "HOLD"
 
     # ========================================================
     # PRECISION SCORE
     # ========================================================
 
-    precision_score = (
-        calculate_precision_score(
-            signal=signal,
-            trend=trend,
-            structure=structure,
-            momentum=momentum,
-            atr_value=atr_numeric,
-            close=float(
-                last["close"]
-            ),
-            ema_fast=float(
-                last["ema_fast"]
-            ),
-            mtf_confirmation=(
-                mtf_confirmation
-            ),
-        )
+    precision_score = calculate_precision_score(
+        signal=signal,
+        trend=trend,
+        structure=structure,
+        momentum=momentum,
+        atr_value=atr_value,
+        close=close,
+        ema_fast=ema_fast_value,
+        ema_slow=ema_slow_value,
+        breakout_strength=breakout_strength,
+        ema_separation=ema_separation,
+        mtf_confirmation=mtf_confirmation
+    )
+
+    precision_grade = get_precision_grade(
+        precision_score
+    )
+
+    precision_decision = get_precision_decision(
+        signal=signal,
+        score=precision_score,
+        precision_pass=precision_pass
     )
 
     # ========================================================
-    # RETURN
+    # FINAL RESULT
     # ========================================================
 
     return {
-
         "signal": signal,
 
-        "precision_pass": (
-            precision_pass
-        ),
+        "precision_pass": precision_pass,
 
-        "precision_score": (
-            precision_score
-        ),
+        "precision_score": precision_score,
 
-        "precision_grade": (
-            get_precision_grade(
-                precision_score
-            )
-        ),
+        "precision_grade": precision_grade,
 
-        "precision_decision": (
-            get_precision_decision(
-                signal=signal,
-                score=precision_score,
-                precision_pass=(
-                    precision_pass
-                ),
-            )
-        ),
+        "precision_decision": precision_decision,
 
         "mtf_status": (
-            mtf_confirmation[
-                "status"
-            ]
+            mtf_confirmation.get(
+                "status",
+                "UNKNOWN"
+            )
             if mtf_confirmation is not None
             else "NOT_CHECKED"
         ),
@@ -768,20 +634,24 @@ def generate_signal(
             4
         ),
 
-        "atr": (
-            atr_numeric
+        "atr": atr_value,
+
+        "breakout_strength": round(
+            breakout_strength,
+            4
         ),
 
-        "buy_score": (
-            buy_score
+        "ema_separation": round(
+            ema_separation,
+            4
         ),
 
-        "sell_score": (
-            sell_score
-        ),
+        "buy_score": buy_score,
+
+        "sell_score": sell_score,
 
         "score": max(
             buy_score,
             sell_score
-        ),
+        )
     }
