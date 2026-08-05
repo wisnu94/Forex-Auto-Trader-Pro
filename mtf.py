@@ -1,58 +1,89 @@
+import pandas as pd
+import numpy as np
+
+
 # ============================================================
-# MTF TREND ENGINE
+# FOREX AUTO TRADER PRO
+# MTF ENGINE V2
+#
+# Architecture:
+# H1  = MARKET BIAS
+# M15 = SETUP CONFIRMATION
+# M1  = ENTRY TRIGGER
 # ============================================================
 
-DEFAULT_TIMEFRAMES = ("H4", "H1", "M15")
 
+# ============================================================
+# EMA
+# ============================================================
 
 def calculate_ema(series, period):
+
     return series.ewm(
         span=period,
         adjust=False
     ).mean()
 
 
+# ============================================================
+# TIMEFRAME TREND
+# ============================================================
+
 def timeframe_trend(
     df,
     fast_period=20,
     slow_period=50
 ):
-    if df is None or len(df) < slow_period:
+
+    if (
+        df is None
+        or len(df) < slow_period
+    ):
         return "HOLD"
 
-    close = df["close"]
+    data = df.copy()
 
-    fast = calculate_ema(
-        close,
+    if "close" not in data.columns:
+        return "HOLD"
+
+    fast_ema = calculate_ema(
+        data["close"],
         fast_period
     )
 
-    slow = calculate_ema(
-        close,
+    slow_ema = calculate_ema(
+        data["close"],
         slow_period
     )
 
-    last_close = float(
-        close.iloc[-1]
-    )
-
-    last_fast = float(
-        fast.iloc[-1]
-    )
-
-    last_slow = float(
-        slow.iloc[-1]
-    )
+    fast = fast_ema.iloc[-1]
+    slow = slow_ema.iloc[-1]
+    close = data["close"].iloc[-1]
 
     if (
-        last_close > last_fast
-        and last_fast > last_slow
+        pd.isna(fast)
+        or pd.isna(slow)
+        or pd.isna(close)
+    ):
+        return "HOLD"
+
+    # ========================================================
+    # BULLISH
+    # ========================================================
+
+    if (
+        fast > slow
+        and close > fast
     ):
         return "BUY"
 
+    # ========================================================
+    # BEARISH
+    # ========================================================
+
     if (
-        last_close < last_fast
-        and last_fast < last_slow
+        fast < slow
+        and close < fast
     ):
         return "SELL"
 
@@ -65,127 +96,385 @@ def timeframe_trend(
 
 def calculate_mtf_score(trends):
 
-    weights = {
-        "H4": 40,
-        "H1": 35,
-        "M15": 25,
-    }
+    if not isinstance(
+        trends,
+        dict
+    ):
+        return 0
 
     score = 0
 
-    for timeframe, weight in weights.items():
+    # ========================================================
+    # H1 — 40 POINTS
+    # ========================================================
 
-        trend = trends.get(
-            timeframe,
-            "HOLD"
-        )
+    h1 = trends.get(
+        "H1",
+        "HOLD"
+    )
 
-        if trend == "BUY":
-            score += weight
+    if h1 == "BUY":
+        score += 40
 
-        elif trend == "SELL":
-            score -= weight
+    elif h1 == "SELL":
+        score -= 40
+
+    # ========================================================
+    # M15 — 30 POINTS
+    # ========================================================
+
+    m15 = trends.get(
+        "M15",
+        "HOLD"
+    )
+
+    if m15 == "BUY":
+        score += 30
+
+    elif m15 == "SELL":
+        score -= 30
+
+    # ========================================================
+    # M1 — 30 POINTS
+    # ========================================================
+
+    m1 = trends.get(
+        "M1",
+        "HOLD"
+    )
+
+    if m1 == "BUY":
+        score += 30
+
+    elif m1 == "SELL":
+        score -= 30
 
     return int(score)
 
 
 # ============================================================
-# MTF CONFIRMATION
+# MTF STATUS
 # ============================================================
 
-def get_mtf_confirmation(
-    symbol,
-    timeframes=DEFAULT_TIMEFRAMES,
-    bars=150
+def calculate_mtf_status(trends):
+
+    if not isinstance(
+        trends,
+        dict
+    ):
+        return "NEUTRAL"
+
+    h1 = trends.get(
+        "H1",
+        "HOLD"
+    )
+
+    m15 = trends.get(
+        "M15",
+        "HOLD"
+    )
+
+    m1 = trends.get(
+        "M1",
+        "HOLD"
+    )
+
+    # ========================================================
+    # STRONG BUY
+    # ========================================================
+
+    if (
+        h1 == "BUY"
+        and m15 == "BUY"
+        and m1 == "BUY"
+    ):
+        return "STRONG_BUY"
+
+    # ========================================================
+    # STRONG SELL
+    # ========================================================
+
+    if (
+        h1 == "SELL"
+        and m15 == "SELL"
+        and m1 == "SELL"
+    ):
+        return "STRONG_SELL"
+
+    # ========================================================
+    # H1 + M15 BUY
+    # ========================================================
+
+    if (
+        h1 == "BUY"
+        and m15 == "BUY"
+    ):
+        return "BUY_BIAS"
+
+    # ========================================================
+    # H1 + M15 SELL
+    # ========================================================
+
+    if (
+        h1 == "SELL"
+        and m15 == "SELL"
+    ):
+        return "SELL_BIAS"
+
+    # ========================================================
+    # H1 ONLY BUY
+    # ========================================================
+
+    if h1 == "BUY":
+        return "BUY_BIAS"
+
+    # ========================================================
+    # H1 ONLY SELL
+    # ========================================================
+
+    if h1 == "SELL":
+        return "SELL_BIAS"
+
+    return "NEUTRAL"
+
+
+# ============================================================
+# MTF CONFIRMATION BUILDER
+# ============================================================
+
+def build_mtf_confirmation(
+    h1_df,
+    m15_df,
+    m1_df
 ):
-    # MT5 is imported only when real market
-    # data is actually requested.
-    #
-    # This keeps the pure MTF calculation
-    # testable inside GitHub Actions.
 
-    from data import get_bars
+    trends = {
+        "H1": timeframe_trend(
+            h1_df,
+            fast_period=20,
+            slow_period=50
+        ),
 
-    trends = {}
+        "M15": timeframe_trend(
+            m15_df,
+            fast_period=20,
+            slow_period=50
+        ),
 
-    for timeframe in timeframes:
-
-        df = get_bars(
-            symbol,
-            timeframe,
-            count=bars
-        )
-
-        trends[timeframe] = timeframe_trend(
-            df
-        )
+        "M1": timeframe_trend(
+            m1_df,
+            fast_period=20,
+            slow_period=50
+        ),
+    }
 
     score = calculate_mtf_score(
         trends
     )
 
-    requested = list(
-        timeframes
+    status = calculate_mtf_status(
+        trends
     )
-
-    all_buy = all(
-        trends.get(tf) == "BUY"
-        for tf in requested
-    )
-
-    all_sell = all(
-        trends.get(tf) == "SELL"
-        for tf in requested
-    )
-
-    if all_buy:
-
-        status = "STRONG_BUY"
-
-    elif all_sell:
-
-        status = "STRONG_SELL"
-
-    elif score >= 40:
-
-        status = "BUY_BIAS"
-
-    elif score <= -40:
-
-        status = "SELL_BIAS"
-
-    else:
-
-        status = "NEUTRAL"
 
     return {
         "trends": trends,
-        "score": score,
+
+        "score": int(score),
+
         "status": status,
+
+        "h1_trend": trends["H1"],
+
+        "m15_trend": trends["M15"],
+
+        "m1_trend": trends["M1"],
     }
 
 
 # ============================================================
-# MTF ENTRY FILTER
+# MTF ENTRY PERMISSION
+#
+# H1 = directional filter
+# M15 = setup filter
+# M1 = trigger
 # ============================================================
 
 def mtf_allows_signal(
     signal,
-    confirmation
+    mtf_confirmation
 ):
+
+    if (
+        not isinstance(
+            mtf_confirmation,
+            dict
+        )
+    ):
+        return False
+
+    trends = mtf_confirmation.get(
+        "trends",
+        {}
+    )
+
+    h1 = trends.get(
+        "H1",
+        "HOLD"
+    )
+
+    m15 = trends.get(
+        "M15",
+        "HOLD"
+    )
+
+    m1 = trends.get(
+        "M1",
+        "HOLD"
+    )
+
+    # ========================================================
+    # BUY
+    #
+    # H1 must be BUY
+    # M15 must be BUY
+    # M1 must be BUY
+    # ========================================================
 
     if signal == "BUY":
 
         return (
-            confirmation["status"]
-            == "STRONG_BUY"
+            h1 == "BUY"
+            and m15 == "BUY"
+            and m1 == "BUY"
         )
+
+    # ========================================================
+    # SELL
+    # ========================================================
 
     if signal == "SELL":
 
         return (
-            confirmation["status"]
-            == "STRONG_SELL"
+            h1 == "SELL"
+            and m15 == "SELL"
+            and m1 == "SELL"
         )
 
     return False
+
+
+# ============================================================
+# MTF BIAS
+#
+# Used when we only need H1 + M15 direction.
+# ============================================================
+
+def mtf_bias(
+    h1_df,
+    m15_df
+):
+
+    h1 = timeframe_trend(
+        h1_df,
+        fast_period=20,
+        slow_period=50
+    )
+
+    m15 = timeframe_trend(
+        m15_df,
+        fast_period=20,
+        slow_period=50
+    )
+
+    if (
+        h1 == "BUY"
+        and m15 == "BUY"
+    ):
+        return "BUY"
+
+    if (
+        h1 == "SELL"
+        and m15 == "SELL"
+    ):
+        return "SELL"
+
+    return "NEUTRAL"
+
+
+# ============================================================
+# MTF DIAGNOSTIC
+# ============================================================
+
+def mtf_diagnostic(
+    mtf_confirmation
+):
+
+    if not isinstance(
+        mtf_confirmation,
+        dict
+    ):
+        return {
+            "h1": "HOLD",
+            "m15": "HOLD",
+            "m1": "HOLD",
+            "score": 0,
+            "status": "NEUTRAL",
+            "aligned": False,
+        }
+
+    trends = mtf_confirmation.get(
+        "trends",
+        {}
+    )
+
+    h1 = trends.get(
+        "H1",
+        "HOLD"
+    )
+
+    m15 = trends.get(
+        "M15",
+        "HOLD"
+    )
+
+    m1 = trends.get(
+        "M1",
+        "HOLD"
+    )
+
+    aligned_buy = (
+        h1 == "BUY"
+        and m15 == "BUY"
+        and m1 == "BUY"
+    )
+
+    aligned_sell = (
+        h1 == "SELL"
+        and m15 == "SELL"
+        and m1 == "SELL"
+    )
+
+    return {
+        "h1": h1,
+
+        "m15": m15,
+
+        "m1": m1,
+
+        "score": int(
+            mtf_confirmation.get(
+                "score",
+                0
+            )
+        ),
+
+        "status": mtf_confirmation.get(
+            "status",
+            "NEUTRAL"
+        ),
+
+        "aligned": (
+            aligned_buy
+            or aligned_sell
+        ),
+    }
