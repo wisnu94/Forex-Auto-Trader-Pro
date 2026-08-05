@@ -1,36 +1,87 @@
-import MetaTrader5 as mt5
 import pandas as pd
+import numpy as np
 
 # ============================================================
-# MT5 TIMEFRAME MAP
+# FOREX AUTO TRADER PRO
+# REAL MARKET DATA ENGINE
+#
+# PRIMARY SOURCE:
+# Yahoo Finance
+#
+# SYMBOL:
+# EURUSD=X
+#
+# GitHub Actions compatible
+# Tidak membutuhkan MetaTrader 5
 # ============================================================
 
-TIMEFRAMES = {
-    "M1": mt5.TIMEFRAME_M1,
-    "M5": mt5.TIMEFRAME_M5,
-    "M15": mt5.TIMEFRAME_M15,
-    "M30": mt5.TIMEFRAME_M30,
-    "H1": mt5.TIMEFRAME_H1,
-    "H4": mt5.TIMEFRAME_H4,
-    "D1": mt5.TIMEFRAME_D1,
+
+# ============================================================
+# SYMBOL MAP
+# ============================================================
+
+SYMBOL_MAP = {
+    "EURUSD": "EURUSD=X",
+    "GBPUSD": "GBPUSD=X",
+    "USDJPY": "JPY=X",
+    "AUDUSD": "AUDUSD=X",
+    "USDCAD": "CAD=X",
+    "USDCHF": "CHF=X",
+    "NZDUSD": "NZDUSD=X",
 }
 
 
 # ============================================================
-# INITIALIZE MT5
+# TIMEFRAME MAP
 # ============================================================
 
-def initialize_mt5():
-    """
-    Connect to MetaTrader 5.
-    """
+TIMEFRAME_MAP = {
+    "M1": "1m",
+    "M5": "5m",
+    "M15": "15m",
+    "M30": "30m",
+    "H1": "1h",
+    "H4": "1h",
+    "D1": "1d",
+}
 
-    if not mt5.initialize():
-        raise RuntimeError(
-            f"MT5 initialize failed: {mt5.last_error()}"
-        )
 
-    return True
+# ============================================================
+# YAHOO RANGE LIMIT
+# ============================================================
+
+def _get_period(timeframe):
+
+    if timeframe == "M1":
+        return "7d"
+
+    if timeframe in ["M5", "M15", "M30"]:
+        return "60d"
+
+    if timeframe == "H1":
+        return "730d"
+
+    if timeframe == "H4":
+        return "730d"
+
+    if timeframe == "D1":
+        return "10y"
+
+    return "60d"
+
+
+# ============================================================
+# NORMALIZE SYMBOL
+# ============================================================
+
+def normalize_symbol(symbol):
+
+    symbol = str(symbol).upper().strip()
+
+    return SYMBOL_MAP.get(
+        symbol,
+        symbol
+    )
 
 
 # ============================================================
@@ -40,103 +91,370 @@ def initialize_mt5():
 def get_bars(
     symbol: str,
     timeframe: str,
-    count: int = 300
+    count: int = 3000
 ) -> pd.DataFrame:
 
-    if timeframe not in TIMEFRAMES:
+    symbol = normalize_symbol(symbol)
+
+    timeframe = str(
+        timeframe
+    ).upper().strip()
+
+    if timeframe not in TIMEFRAME_MAP:
+
         raise ValueError(
             f"Unsupported timeframe: {timeframe}"
         )
 
-    initialize_mt5()
+    try:
 
-    # Pastikan symbol tersedia
-    symbol_info = mt5.symbol_info(symbol)
+        import yfinance as yf
 
-    if symbol_info is None:
+    except ImportError:
+
         raise RuntimeError(
-            f"Symbol tidak ditemukan di MT5: {symbol}"
+            "yfinance belum terinstall. "
+            "Tambahkan yfinance ke requirements.txt"
         )
 
-    # Aktifkan symbol jika belum aktif
-    if not symbol_info.visible:
-        if not mt5.symbol_select(symbol, True):
-            raise RuntimeError(
-                f"Gagal mengaktifkan symbol: {symbol}"
+    interval = TIMEFRAME_MAP[
+        timeframe
+    ]
+
+    period = _get_period(
+        timeframe
+    )
+
+    print(
+        f"Downloading real market data: "
+        f"{symbol} {timeframe}"
+    )
+
+    print(
+        f"Yahoo interval: {interval}"
+    )
+
+    print(
+        f"Yahoo period  : {period}"
+    )
+
+    # --------------------------------------------------------
+    # DOWNLOAD
+    # --------------------------------------------------------
+
+    df = yf.download(
+        tickers=symbol,
+        period=period,
+        interval=interval,
+        auto_adjust=False,
+        progress=False,
+        threads=False,
+    )
+
+    if df is None or len(df) == 0:
+
+        raise RuntimeError(
+            f"Yahoo Finance tidak mengembalikan "
+            f"data untuk {symbol} {timeframe}"
+        )
+
+    # --------------------------------------------------------
+    # NORMALIZE MULTIINDEX
+    # --------------------------------------------------------
+
+    if isinstance(
+        df.columns,
+        pd.MultiIndex
+    ):
+
+        df.columns = [
+            column[0]
+            for column in df.columns
+        ]
+
+    # --------------------------------------------------------
+    # RESET INDEX
+    # --------------------------------------------------------
+
+    df = df.reset_index()
+
+    # --------------------------------------------------------
+    # NORMALIZE TIME
+    # --------------------------------------------------------
+
+    if "Datetime" in df.columns:
+
+        df = df.rename(
+            columns={
+                "Datetime": "time"
+            }
+        )
+
+    elif "Date" in df.columns:
+
+        df = df.rename(
+            columns={
+                "Date": "time"
+            }
+        )
+
+    # --------------------------------------------------------
+    # REQUIRED COLUMNS
+    # --------------------------------------------------------
+
+    required = [
+        "open",
+        "high",
+        "low",
+        "close",
+    ]
+
+    df.columns = [
+        str(column).lower()
+        for column in df.columns
+    ]
+
+    missing = [
+        column
+        for column in required
+        if column not in df.columns
+    ]
+
+    if missing:
+
+        raise RuntimeError(
+            f"Data market tidak lengkap. "
+            f"Missing columns: {missing}"
+        )
+
+    # --------------------------------------------------------
+    # KEEP REQUIRED DATA
+    # --------------------------------------------------------
+
+    columns = [
+        "time",
+        "open",
+        "high",
+        "low",
+        "close",
+    ]
+
+    optional_columns = [
+        "volume"
+    ]
+
+    for column in optional_columns:
+
+        if column in df.columns:
+
+            columns.append(
+                column
             )
 
-    rates = mt5.copy_rates_from_pos(
-        symbol,
-        TIMEFRAMES[timeframe],
-        0,
-        count
-    )
+    df = df[
+        columns
+    ].copy()
 
-    if rates is None:
-        raise RuntimeError(
-            f"Gagal mengambil data {symbol}: "
-            f"{mt5.last_error()}"
+    # --------------------------------------------------------
+    # RENAME VOLUME
+    # --------------------------------------------------------
+
+    if "volume" in df.columns:
+
+        df = df.rename(
+            columns={
+                "volume":
+                    "tick_volume"
+            }
         )
 
-    if len(rates) == 0:
-        raise RuntimeError(
-            f"Tidak ada data untuk {symbol}"
+    else:
+
+        df["tick_volume"] = 0
+
+    # --------------------------------------------------------
+    # REAL VOLUME PLACEHOLDER
+    #
+    # Forex Yahoo data tidak memiliki
+    # centralized real volume.
+    # --------------------------------------------------------
+
+    df["real_volume"] = 0
+
+    # --------------------------------------------------------
+    # SPREAD PLACEHOLDER
+    #
+    # Yahoo historical candles tidak
+    # menyediakan bid/ask spread.
+    # --------------------------------------------------------
+
+    df["spread"] = 0
+
+    # --------------------------------------------------------
+    # NUMERIC
+    # --------------------------------------------------------
+
+    numeric_columns = [
+        "open",
+        "high",
+        "low",
+        "close",
+        "tick_volume",
+        "real_volume",
+        "spread",
+    ]
+
+    for column in numeric_columns:
+
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce"
         )
 
-    df = pd.DataFrame(rates)
+    # --------------------------------------------------------
+    # REMOVE INVALID
+    # --------------------------------------------------------
 
-    # Convert Unix timestamp
-    df["time"] = pd.to_datetime(
-        df["time"],
-        unit="s"
+    df = df.dropna(
+        subset=[
+            "open",
+            "high",
+            "low",
+            "close",
+        ]
     )
 
-    # Pastikan urutan waktu
-    df = df.sort_values("time")
+    # --------------------------------------------------------
+    # SORT
+    # --------------------------------------------------------
 
-    # Reset index
-    df = df.reset_index(drop=True)
+    df = df.sort_values(
+        "time"
+    )
+
+    df = df.drop_duplicates(
+        subset=["time"]
+    )
+
+    df = df.reset_index(
+        drop=True
+    )
+
+    # --------------------------------------------------------
+    # LIMIT COUNT
+    #
+    # Ambil candle terbaru sebanyak count.
+    # --------------------------------------------------------
+
+    if count > 0 and len(df) > count:
+
+        df = df.tail(
+            count
+        ).reset_index(
+            drop=True
+        )
+
+    # --------------------------------------------------------
+    # VALIDATION
+    # --------------------------------------------------------
+
+    if len(df) == 0:
+
+        raise RuntimeError(
+            f"Data kosong setelah validasi: "
+            f"{symbol} {timeframe}"
+        )
+
+    print(
+        f"Downloaded real bars: "
+        f"{len(df)} {timeframe}"
+    )
+
+    print(
+        f"First candle: "
+        f"{df.iloc[0]['time']}"
+    )
+
+    print(
+        f"Last candle : "
+        f"{df.iloc[-1]['time']}"
+    )
 
     return df
 
 
 # ============================================================
 # GET CURRENT PRICE
+#
+# Digunakan oleh live engine.
 # ============================================================
 
-def get_tick(symbol: str):
+def get_tick(symbol):
 
-    initialize_mt5()
+    symbol = normalize_symbol(
+        symbol
+    )
 
-    tick = mt5.symbol_info_tick(symbol)
+    try:
 
-    if tick is None:
+        import yfinance as yf
+
+    except ImportError:
+
         raise RuntimeError(
-            f"Tidak dapat mengambil tick {symbol}: "
-            f"{mt5.last_error()}"
+            "yfinance belum terinstall."
         )
 
-    return tick
+    ticker = yf.Ticker(
+        symbol
+    )
+
+    data = ticker.history(
+        period="1d",
+        interval="1m"
+    )
+
+    if data is None or len(data) == 0:
+
+        raise RuntimeError(
+            f"Tidak dapat mengambil tick "
+            f"{symbol}"
+        )
+
+    last = data.iloc[-1]
+
+    price = float(
+        last["Close"]
+    )
+
+    return {
+        "bid": price,
+        "ask": price,
+        "last": price,
+    }
 
 
 # ============================================================
 # GET SPREAD
+#
+# Yahoo historical data tidak memiliki
+# bid/ask spread.
 # ============================================================
 
-def get_spread_points(symbol: str) -> float:
+def get_spread_points(
+    symbol: str
+) -> float:
 
-    initialize_mt5()
+    return 0.0
 
-    info = mt5.symbol_info(symbol)
-    tick = mt5.symbol_info_tick(symbol)
 
-    if info is None or tick is None:
-        raise RuntimeError(
-            f"Gagal mendapatkan spread {symbol}"
-        )
+# ============================================================
+# CLOSE CONNECTION
+#
+# Compatibility function.
+# Tidak diperlukan untuk Yahoo Finance.
+# ============================================================
 
-    spread = (
-        tick.ask - tick.bid
-    ) / info.point
+def shutdown():
 
-    return float(spread)
+    return True
