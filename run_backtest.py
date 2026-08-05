@@ -72,22 +72,16 @@ def create_backtest_data(bars=3000):
     df = pd.DataFrame(
         {
             "open": open_price,
-
             "high": high,
-
             "low": low,
-
             "close": close,
-
             "tick_volume": np.full(
                 bars,
                 1000
             ),
-
             "spread": np.zeros(
                 bars
             ),
-
             "real_volume": np.zeros(
                 bars
             ),
@@ -112,21 +106,44 @@ def main():
     )
 
     print(
-        "BACKTEST ENGINE"
+        "BACKTEST ENGINE V3"
     )
 
     print("=" * 60)
 
     print(
-        f"Symbol     : {SYMBOL}"
+        f"Symbol          : {SYMBOL}"
+    )
+
+    # M15 tetap menjadi BASE DATA.
+    # MTF engine berjalan H1 -> M15 -> M1.
+
+    print(
+        f"Base Timeframe  : {TIMEFRAME}"
     )
 
     print(
-        f"Timeframe  : {TIMEFRAME}"
+        "MTF Architecture : H1 -> M15 -> M1"
     )
 
     print(
-        f"Bars       : {BARS}"
+        "H1               : MARKET BIAS"
+    )
+
+    print(
+        "M15              : SETUP CONFIRMATION"
+    )
+
+    print(
+        "M1               : ENTRY TRIGGER"
+    )
+
+    print(
+        "M1 Data          : SYNTHETIC PROXY"
+    )
+
+    print(
+        f"Bars             : {BARS} M15"
     )
 
     print()
@@ -140,7 +157,7 @@ def main():
     )
 
     print(
-        f"Generated backtest bars: {len(df)}"
+        f"Generated base bars: {len(df)} M15"
     )
 
     # --------------------------------------------------------
