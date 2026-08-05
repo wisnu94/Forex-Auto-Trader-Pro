@@ -397,6 +397,127 @@ def main():
             f"Win Rate: "
             f"{data['win_rate']:>6.2f}%"
         )
+        
+    # --------------------------------------------------------
+    # SELL DIAGNOSTIC
+    # --------------------------------------------------------
+    
+    sell_trades = [
+        trade
+        for trade in trades
+        if trade.get("signal") == "SELL"
+    ]
+    
+    print()
+    
+    print("-" * 60)
+    
+    print(
+        "SELL DIAGNOSTIC"
+    )
+    
+    print("-" * 60)
+    
+    sell_total = len(
+        sell_trades
+    )
+    
+    sell_wins = sum(
+        1
+        for trade in sell_trades
+        if trade.get("outcome") == "WIN"
+    )
+    
+    sell_losses = sum(
+        1
+        for trade in sell_trades
+        if trade.get("outcome") == "LOSS"
+    )
+    
+    print(
+        f"SELL Trades       : {sell_total}"
+    )
+    
+    print(
+        f"SELL Wins         : {sell_wins}"
+    )
+    
+    print(
+        f"SELL Losses       : {sell_losses}"
+    )
+    
+    if sell_total > 0:
+    
+        avg_rsi = np.mean([
+            trade.get("rsi", np.nan)
+            for trade in sell_trades
+        ])
+    
+        avg_adx = np.mean([
+            trade.get("adx", np.nan)
+            for trade in sell_trades
+        ])
+    
+        avg_momentum = np.mean([
+            trade.get("momentum", np.nan)
+            for trade in sell_trades
+        ])
+    
+        avg_mtf = np.mean([
+            trade.get("mtf_score", np.nan)
+            for trade in sell_trades
+        ])
+    
+        avg_precision = np.mean([
+            trade.get("precision_score", np.nan)
+            for trade in sell_trades
+        ])
+    
+        print(
+            f"SELL Avg RSI      : {avg_rsi:.2f}"
+        )
+    
+        print(
+            f"SELL Avg ADX      : {avg_adx:.2f}"
+        )
+    
+        print(
+            f"SELL Avg Momentum : {avg_momentum:.6f}"
+        )
+    
+        print(
+            f"SELL Avg MTF      : {avg_mtf:.2f}"
+        )
+    
+        print(
+            f"SELL Avg Score    : {avg_precision:.2f}"
+        )
+    
+        print()
+    
+        print("SELL TRADE DETAILS")
+    
+        for n, trade in enumerate(
+            sell_trades,
+            start=1
+        ):
+    
+            print(
+                f"{n}. "
+                f"Outcome={trade.get('outcome')} | "
+                f"RSI={trade.get('rsi')} | "
+                f"ADX={trade.get('adx')} | "
+                f"Momentum={trade.get('momentum')} | "
+                f"MTF={trade.get('mtf_score')} | "
+                f"Score={trade.get('precision_score')} | "
+                f"Grade={trade.get('precision_grade')}"
+            )
+    
+    else:
+    
+        print(
+            "No SELL trades available."
+        )
 
     # --------------------------------------------------------
     # SAVE TRADE LOG
