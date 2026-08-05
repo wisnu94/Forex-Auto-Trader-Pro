@@ -4,15 +4,27 @@ import numpy as np
 
 # ============================================================
 # FOREX AUTO TRADER PRO
-# MTF ENGINE V3
+# MTF ENGINE V4
 #
-# Primary Architecture:
+# PRIMARY ARCHITECTURE
 #
-# H1  = MARKET BIAS
-# M15 = SETUP CONFIRMATION
-# M1  = ENTRY TRIGGER
+# H1  = MARKET BIAS        -> REQUIRED
+# M15 = SETUP CONFIRMATION -> REQUIRED
+# M1  = ENTRY CONFIRMATION -> SUPPLEMENTARY
 #
-# Legacy compatibility:
+# IMPORTANT:
+# M1 TIDAK BOLEH menjadi hard blocker.
+#
+# H1 + M15 aligned:
+#     signal boleh masuk
+#
+# M1 aligned:
+#     confidence tambahan
+#
+# M1 opposite / HOLD:
+#     tidak otomatis membatalkan signal
+#
+# LEGACY:
 #
 # H4  = 40
 # H1  = 30
@@ -118,11 +130,14 @@ def calculate_mtf_score(trends):
         return 0
 
     # ========================================================
-    # PRIMARY ARCHITECTURE
+    # PRIMARY
     #
     # H1  = 40
     # M15 = 30
     # M1  = 30
+    #
+    # M1 tetap dihitung sebagai confidence.
+    # Tetapi M1 tidak menjadi permission blocker.
     # ========================================================
 
     if "M1" in trends:
@@ -156,6 +171,7 @@ def calculate_mtf_score(trends):
         elif m15 == "SELL":
             score -= 30
 
+        # M1 supplementary score
         if m1 == "BUY":
             score += 30
 
@@ -165,7 +181,7 @@ def calculate_mtf_score(trends):
         return int(score)
 
     # ========================================================
-    # LEGACY ARCHITECTURE
+    # LEGACY
     #
     # H4  = 40
     # H1  = 30
@@ -247,6 +263,10 @@ def calculate_mtf_status(trends):
             "HOLD"
         )
 
+        # ----------------------------------------------------
+        # PERFECT ALIGNMENT
+        # ----------------------------------------------------
+
         if (
             h1 == "BUY"
             and m15 == "BUY"
@@ -261,6 +281,10 @@ def calculate_mtf_status(trends):
         ):
             return "STRONG_SELL"
 
+        # ----------------------------------------------------
+        # H1 + M15 CORE ALIGNMENT
+        # ----------------------------------------------------
+
         if (
             h1 == "BUY"
             and m15 == "BUY"
@@ -272,6 +296,10 @@ def calculate_mtf_status(trends):
             and m15 == "SELL"
         ):
             return "SELL_BIAS"
+
+        # ----------------------------------------------------
+        # H1 BIAS ONLY
+        # ----------------------------------------------------
 
         if h1 == "BUY":
             return "BUY_BIAS"
@@ -328,10 +356,16 @@ def calculate_mtf_status(trends):
         ):
             return "SELL_BIAS"
 
-        if h4 == "BUY" or h1 == "BUY":
+        if (
+            h4 == "BUY"
+            or h1 == "BUY"
+        ):
             return "BUY_BIAS"
 
-        if h4 == "SELL" or h1 == "SELL":
+        if (
+            h4 == "SELL"
+            or h1 == "SELL"
+        ):
             return "SELL_BIAS"
 
         return "NEUTRAL"
@@ -377,6 +411,35 @@ def build_mtf_confirmation(
         trends
     )
 
+    h1_trend = trends["H1"]
+    m15_trend = trends["M15"]
+    m1_trend = trends["M1"]
+
+    # ========================================================
+    # CORE ALIGNMENT
+    #
+    # H1 + M15 = CORE
+    # M1        = SUPPLEMENTARY
+    # ========================================================
+
+    core_buy = (
+        h1_trend == "BUY"
+        and m15_trend == "BUY"
+    )
+
+    core_sell = (
+        h1_trend == "SELL"
+        and m15_trend == "SELL"
+    )
+
+    m1_buy_confirmation = (
+        m1_trend == "BUY"
+    )
+
+    m1_sell_confirmation = (
+        m1_trend == "SELL"
+    )
+
     return {
         "trends": trends,
 
@@ -384,26 +447,48 @@ def build_mtf_confirmation(
 
         "status": status,
 
-        "h1_trend": trends["H1"],
+        "h1_trend": h1_trend,
 
-        "m15_trend": trends["M15"],
+        "m15_trend": m15_trend,
 
-        "m1_trend": trends["M1"],
+        "m1_trend": m1_trend,
+
+        # ----------------------------------------------------
+        # CORE
+        # ----------------------------------------------------
+
+        "core_buy": core_buy,
+
+        "core_sell": core_sell,
+
+        # ----------------------------------------------------
+        # M1 SUPPLEMENTARY
+        # ----------------------------------------------------
+
+        "m1_buy_confirmation":
+            m1_buy_confirmation,
+
+        "m1_sell_confirmation":
+            m1_sell_confirmation,
+
+        "m1_aligned":
+            (
+                m1_buy_confirmation
+                or m1_sell_confirmation
+            ),
     }
 
 
 # ============================================================
 # MTF ENTRY PERMISSION
 #
-# PRIMARY:
+# PRIMARY RULE
 #
-# H1  = directional filter
-# M15 = setup filter
-# M1  = trigger
+# H1  = REQUIRED
+# M15 = REQUIRED
+# M1  = SUPPLEMENTARY
 #
-# LEGACY:
-#
-# H4 / H1 / M15
+# M1 TIDAK BOLEH MEMBATALKAN ENTRY.
 # ============================================================
 
 def mtf_allows_signal(
@@ -442,25 +527,32 @@ def mtf_allows_signal(
             "HOLD"
         )
 
-        m1 = trends.get(
-            "M1",
-            "HOLD"
-        )
+        # ----------------------------------------------------
+        # BUY
+        #
+        # H1 + M15 wajib BUY.
+        # M1 bebas BUY / HOLD / SELL.
+        # ----------------------------------------------------
 
         if signal == "BUY":
 
             return (
                 h1 == "BUY"
                 and m15 == "BUY"
-                and m1 == "BUY"
             )
+
+        # ----------------------------------------------------
+        # SELL
+        #
+        # H1 + M15 wajib SELL.
+        # M1 bebas BUY / HOLD / SELL.
+        # ----------------------------------------------------
 
         if signal == "SELL":
 
             return (
                 h1 == "SELL"
                 and m15 == "SELL"
-                and m1 == "SELL"
             )
 
         return False
@@ -555,13 +647,23 @@ def mtf_diagnostic(
         mtf_confirmation,
         dict
     ):
+
         return {
             "h1": "HOLD",
+
             "m15": "HOLD",
+
             "m1": "HOLD",
+
             "score": 0,
+
             "status": "NEUTRAL",
+
             "aligned": False,
+
+            "core_aligned": False,
+
+            "m1_confirmed": False,
         }
 
     trends = mtf_confirmation.get(
@@ -584,24 +686,42 @@ def mtf_diagnostic(
         "HOLD"
     )
 
+    # ========================================================
+    # CORE ALIGNMENT
+    # ========================================================
+
     aligned_buy = (
         h1 == "BUY"
         and m15 == "BUY"
-        and (
-            m1 == "BUY"
-            if "M1" in trends
-            else True
-        )
     )
 
     aligned_sell = (
         h1 == "SELL"
         and m15 == "SELL"
-        and (
-            m1 == "SELL"
-            if "M1" in trends
-            else True
-        )
+    )
+
+    core_aligned = (
+        aligned_buy
+        or aligned_sell
+    )
+
+    # ========================================================
+    # M1 CONFIRMATION
+    # ========================================================
+
+    m1_buy_confirmed = (
+        aligned_buy
+        and m1 == "BUY"
+    )
+
+    m1_sell_confirmed = (
+        aligned_sell
+        and m1 == "SELL"
+    )
+
+    m1_confirmed = (
+        m1_buy_confirmed
+        or m1_sell_confirmed
     )
 
     return {
@@ -618,13 +738,26 @@ def mtf_diagnostic(
             )
         ),
 
-        "status": mtf_confirmation.get(
-            "status",
-            "NEUTRAL"
-        ),
+        "status":
+            mtf_confirmation.get(
+                "status",
+                "NEUTRAL"
+            ),
 
-        "aligned": (
-            aligned_buy
-            or aligned_sell
-        ),
+        # H1 + M15
+        "aligned":
+            core_aligned,
+
+        "core_aligned":
+            core_aligned,
+
+        # M1 supplementary
+        "m1_confirmed":
+            m1_confirmed,
+
+        "m1_buy_confirmed":
+            m1_buy_confirmed,
+
+        "m1_sell_confirmed":
+            m1_sell_confirmed,
     }
