@@ -1,12 +1,6 @@
 import pandas as pd
 import numpy as np
 
-def create_backtest_data(bars=500):
-
-    df = create_backtest_data(
-        bars=BARS
-    )
-
 from backtest import (
     backtest_strategy,
     analyze_grades,
@@ -17,6 +11,7 @@ from config import (
     SYMBOL,
     TIMEFRAME,
 )
+
 
 # ============================================================
 # BACKTEST SETTINGS
@@ -31,15 +26,95 @@ MIN_SCORE = 70
 
 
 # ============================================================
+# SYNTHETIC BACKTEST DATA
+# ============================================================
+
+def create_backtest_data(bars=3000):
+
+    rng = np.random.default_rng(42)
+
+    returns = rng.normal(
+        loc=0.00005,
+        scale=0.001,
+        size=bars
+    )
+
+    close = (
+        1.1000
+        * np.exp(
+            np.cumsum(returns)
+        )
+    )
+
+    open_price = np.roll(
+        close,
+        1
+    )
+
+    open_price[0] = close[0]
+
+    high = (
+        np.maximum(
+            open_price,
+            close
+        )
+        + 0.0005
+    )
+
+    low = (
+        np.minimum(
+            open_price,
+            close
+        )
+        - 0.0005
+    )
+
+    df = pd.DataFrame(
+        {
+            "open": open_price,
+
+            "high": high,
+
+            "low": low,
+
+            "close": close,
+
+            "tick_volume": np.full(
+                bars,
+                1000
+            ),
+
+            "spread": np.zeros(
+                bars
+            ),
+
+            "real_volume": np.zeros(
+                bars
+            ),
+        }
+    )
+
+    return df
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
 def main():
 
     print()
+
     print("=" * 60)
-    print("FOREX AUTO TRADER PRO")
-    print("BACKTEST ENGINE")
+
+    print(
+        "FOREX AUTO TRADER PRO"
+    )
+
+    print(
+        "BACKTEST ENGINE"
+    )
+
     print("=" * 60)
 
     print(
@@ -59,56 +134,9 @@ def main():
     # --------------------------------------------------------
     # LOAD BACKTEST DATA
     # --------------------------------------------------------
-    #
-    # GitHub Actions tidak membutuhkan MT5.
-    # Gunakan synthetic OHLC data untuk validasi engine.
-    #
 
-    rng = np.random.default_rng(42)
-
-    returns = rng.normal(
-        loc=0.00005,
-        scale=0.001,
-        size=BARS
-    )
-
-    close = (
-        1.1000
-        * np.exp(
-            np.cumsum(returns)
-        )
-    )
-
-    open_price = np.roll(
-        close,
-        1
-    )
-
-    open_price[0] = close[0]
-
-    high = np.maximum(
-        open_price,
-        close
-    ) + 0.0005
-
-    low = np.minimum(
-        open_price,
-        close
-    ) - 0.0005
-
-    df = pd.DataFrame(
-        {
-            "open": open_price,
-            "high": high,
-            "low": low,
-            "close": close,
-            "tick_volume": np.full(
-                BARS,
-                1000
-            ),
-            "spread": np.zeros(BARS),
-            "real_volume": np.zeros(BARS),
-        }
+    df = create_backtest_data(
+        bars=BARS
     )
 
     print(
@@ -138,8 +166,9 @@ def main():
         ),
 
         min_score=MIN_SCORE
+
     )
-    
+
     # --------------------------------------------------------
     # BACKTEST VALIDATION
     # --------------------------------------------------------
@@ -147,21 +176,34 @@ def main():
     if result["total_trades"] == 0:
 
         print()
-        print("⚠️ BACKTEST VALIDATION")
+
+        print(
+            "⚠️ BACKTEST VALIDATION"
+        )
+
         print("-" * 60)
-        print("No valid trades were generated.")
+
+        print(
+            "No valid trades were generated."
+        )
+
         print(
             "Do NOT optimize the strategy yet."
         )
+
         print(
-            "Reason: the current backtest filter "
-            "may be too restrictive."
+            "Reason: the current backtest "
+            "filter may be too restrictive."
         )
 
     else:
 
         print()
-        print("✅ BACKTEST VALIDATION")
+
+        print(
+            "✅ BACKTEST VALIDATION"
+        )
+
         print("-" * 60)
 
         print(
@@ -194,8 +236,13 @@ def main():
     # --------------------------------------------------------
 
     print()
+
     print("-" * 60)
-    print("BACKTEST SUMMARY")
+
+    print(
+        "BACKTEST SUMMARY"
+    )
+
     print("-" * 60)
 
     print(
@@ -244,8 +291,13 @@ def main():
     )
 
     print()
+
     print("-" * 60)
-    print("PRECISION GRADE ANALYSIS")
+
+    print(
+        "PRECISION GRADE ANALYSIS"
+    )
+
     print("-" * 60)
 
     for grade, data in grades.items():
@@ -267,8 +319,13 @@ def main():
     )
 
     print()
+
     print("-" * 60)
-    print("SIGNAL ANALYSIS")
+
+    print(
+        "SIGNAL ANALYSIS"
+    )
+
     print("-" * 60)
 
     for signal, data in signals.items():
@@ -297,15 +354,29 @@ def main():
         )
 
         print()
+
         print(
             "Saved: backtest_trades.csv"
         )
 
+    # --------------------------------------------------------
+    # COMPLETE
+    # --------------------------------------------------------
+
     print()
-    print("=" * 60)
-    print("BACKTEST COMPLETE")
+
     print("=" * 60)
 
+    print(
+        "BACKTEST COMPLETE"
+    )
+
+    print("=" * 60)
+
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
 
