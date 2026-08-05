@@ -19,6 +19,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Debug: list .github directory
+        run: |
+          echo "PWD: $(pwd)"
+          echo "Listing .github directory:"
+          ls -la .github || true
+          echo "Listing .github/scripts directory:"
+          ls -la .github/scripts || true
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -39,4 +47,8 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
         run: |
+          if [ ! -f .github/scripts/chatgpt_assistant.py ]; then
+            echo ".github/scripts/chatgpt_assistant.py not found! Exiting."
+            exit 2
+          fi
           python .github/scripts/chatgpt_assistant.py
