@@ -764,6 +764,101 @@ def analyze_grades(trades):
 # ============================================================
 
 def analyze_signals(trades):
+    
+            result[signal] = {
+            "trades": total,
+            "wins": wins,
+            "win_rate": round(
+                win_rate,
+                2
+            ),
+        }
+
+    return result
+
+# ============================================================
+# MTF DIAGNOSTIC ANALYSIS
+# ============================================================
+
+def analyze_mtf(trades):
+
+    result = {}
+
+    combinations = [
+        ("H4", "BUY"),
+        ("H4", "SELL"),
+        ("H1", "BUY"),
+        ("H1", "SELL"),
+        ("M15", "BUY"),
+        ("M15", "SELL"),
+    ]
+
+    for timeframe, direction in combinations:
+
+        subset = [
+            trade
+            for trade in trades
+            if trade.get(
+                "signal"
+            ) == direction
+            and trade.get(
+                f"mtf_{timeframe.lower()}"
+            ) == direction
+        ]
+
+        total = len(subset)
+
+        wins = sum(
+            1
+            for trade in subset
+            if trade.get(
+                "outcome"
+            ) == "WIN"
+        )
+
+        losses = sum(
+            1
+            for trade in subset
+            if trade.get(
+                "outcome"
+            ) == "LOSS"
+        )
+
+        win_rate = (
+            (
+                wins
+                / total
+            )
+            * 100
+            if total > 0
+            else 0.0
+        )
+
+        net_r = sum(
+            trade.get(
+                "r_multiple",
+                0
+            )
+            for trade in subset
+        )
+
+        result[
+            f"{timeframe}_{direction}"
+        ] = {
+            "trades": total,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(
+                win_rate,
+                2
+            ),
+            "net_r": round(
+                net_r,
+                3
+            ),
+        }
+
+    return result
 
     result = {}
 
