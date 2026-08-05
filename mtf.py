@@ -4,12 +4,19 @@ import numpy as np
 
 # ============================================================
 # FOREX AUTO TRADER PRO
-# MTF ENGINE V2
+# MTF ENGINE V3
 #
-# Architecture:
+# Primary Architecture:
+#
 # H1  = MARKET BIAS
 # M15 = SETUP CONFIRMATION
 # M1  = ENTRY TRIGGER
+#
+# Legacy compatibility:
+#
+# H4  = 40
+# H1  = 30
+# M15 = 30
 # ============================================================
 
 
@@ -18,6 +25,9 @@ import numpy as np
 # ============================================================
 
 def calculate_ema(series, period):
+
+    if series is None:
+        return pd.Series(dtype=float)
 
     return series.ewm(
         span=period,
@@ -46,44 +56,49 @@ def timeframe_trend(
     if "close" not in data.columns:
         return "HOLD"
 
-    fast_ema = calculate_ema(
+    close = pd.to_numeric(
         data["close"],
+        errors="coerce"
+    )
+
+    fast_ema = calculate_ema(
+        close,
         fast_period
     )
 
     slow_ema = calculate_ema(
-        data["close"],
+        close,
         slow_period
     )
 
     fast = fast_ema.iloc[-1]
     slow = slow_ema.iloc[-1]
-    close = data["close"].iloc[-1]
+    last_close = close.iloc[-1]
 
     if (
         pd.isna(fast)
         or pd.isna(slow)
-        or pd.isna(close)
+        or pd.isna(last_close)
     ):
         return "HOLD"
 
-    # ========================================================
-    # BULLISH
-    # ========================================================
+    # --------------------------------------------------------
+    # BUY
+    # --------------------------------------------------------
 
     if (
         fast > slow
-        and close > fast
+        and last_close > fast
     ):
         return "BUY"
 
-    # ========================================================
-    # BEARISH
-    # ========================================================
+    # --------------------------------------------------------
+    # SELL
+    # --------------------------------------------------------
 
     if (
         fast < slow
-        and close < fast
+        and last_close < fast
     ):
         return "SELL"
 
@@ -103,7 +118,7 @@ def calculate_mtf_score(trends):
         return 0
 
     # ========================================================
-    # NEW ARCHITECTURE
+    # PRIMARY ARCHITECTURE
     #
     # H1  = 40
     # M15 = 30
@@ -150,13 +165,11 @@ def calculate_mtf_score(trends):
         return int(score)
 
     # ========================================================
-    # LEGACY COMPATIBILITY
+    # LEGACY ARCHITECTURE
     #
     # H4  = 40
     # H1  = 30
     # M15 = 30
-    #
-    # Supaya test lama dan modul lama tetap berjalan.
     # ========================================================
 
     if "H4" in trends:
@@ -200,6 +213,7 @@ def calculate_mtf_score(trends):
 
     return 0
 
+
 # ============================================================
 # MTF STATUS
 # ============================================================
@@ -212,76 +226,115 @@ def calculate_mtf_status(trends):
     ):
         return "NEUTRAL"
 
-    h1 = trends.get(
-        "H1",
-        "HOLD"
-    )
-
-    m15 = trends.get(
-        "M15",
-        "HOLD"
-    )
-
-    m1 = trends.get(
-        "M1",
-        "HOLD"
-    )
-
     # ========================================================
-    # STRONG BUY
+    # PRIMARY H1 / M15 / M1
     # ========================================================
 
-    if (
-        h1 == "BUY"
-        and m15 == "BUY"
-        and m1 == "BUY"
-    ):
-        return "STRONG_BUY"
+    if "M1" in trends:
+
+        h1 = trends.get(
+            "H1",
+            "HOLD"
+        )
+
+        m15 = trends.get(
+            "M15",
+            "HOLD"
+        )
+
+        m1 = trends.get(
+            "M1",
+            "HOLD"
+        )
+
+        if (
+            h1 == "BUY"
+            and m15 == "BUY"
+            and m1 == "BUY"
+        ):
+            return "STRONG_BUY"
+
+        if (
+            h1 == "SELL"
+            and m15 == "SELL"
+            and m1 == "SELL"
+        ):
+            return "STRONG_SELL"
+
+        if (
+            h1 == "BUY"
+            and m15 == "BUY"
+        ):
+            return "BUY_BIAS"
+
+        if (
+            h1 == "SELL"
+            and m15 == "SELL"
+        ):
+            return "SELL_BIAS"
+
+        if h1 == "BUY":
+            return "BUY_BIAS"
+
+        if h1 == "SELL":
+            return "SELL_BIAS"
+
+        return "NEUTRAL"
 
     # ========================================================
-    # STRONG SELL
+    # LEGACY H4 / H1 / M15
     # ========================================================
 
-    if (
-        h1 == "SELL"
-        and m15 == "SELL"
-        and m1 == "SELL"
-    ):
-        return "STRONG_SELL"
+    if "H4" in trends:
 
-    # ========================================================
-    # H1 + M15 BUY
-    # ========================================================
+        h4 = trends.get(
+            "H4",
+            "HOLD"
+        )
 
-    if (
-        h1 == "BUY"
-        and m15 == "BUY"
-    ):
-        return "BUY_BIAS"
+        h1 = trends.get(
+            "H1",
+            "HOLD"
+        )
 
-    # ========================================================
-    # H1 + M15 SELL
-    # ========================================================
+        m15 = trends.get(
+            "M15",
+            "HOLD"
+        )
 
-    if (
-        h1 == "SELL"
-        and m15 == "SELL"
-    ):
-        return "SELL_BIAS"
+        if (
+            h4 == "BUY"
+            and h1 == "BUY"
+            and m15 == "BUY"
+        ):
+            return "STRONG_BUY"
 
-    # ========================================================
-    # H1 ONLY BUY
-    # ========================================================
+        if (
+            h4 == "SELL"
+            and h1 == "SELL"
+            and m15 == "SELL"
+        ):
+            return "STRONG_SELL"
 
-    if h1 == "BUY":
-        return "BUY_BIAS"
+        if (
+            h4 == "BUY"
+            and h1 == "BUY"
+        ):
+            return "BUY_BIAS"
 
-    # ========================================================
-    # H1 ONLY SELL
-    # ========================================================
+        if (
+            h4 == "SELL"
+            and h1 == "SELL"
+        ):
+            return "SELL_BIAS"
 
-    if h1 == "SELL":
-        return "SELL_BIAS"
+        if h4 == "BUY" or h1 == "BUY":
+            return "BUY_BIAS"
+
+        if h4 == "SELL" or h1 == "SELL":
+            return "SELL_BIAS"
+
+        return "NEUTRAL"
 
     return "NEUTRAL"
 
@@ -342,23 +395,15 @@ def build_mtf_confirmation(
 # ============================================================
 # MTF ENTRY PERMISSION
 #
-# H1 = directional filter
-# M15 = setup filter
-# M1 = trigger
-# ============================================================
-
-# ============================================================
-# MTF ENTRY PERMISSION
+# PRIMARY:
 #
-# NEW ARCHITECTURE
 # H1  = directional filter
 # M15 = setup filter
 # M1  = trigger
 #
-# LEGACY COMPATIBILITY
-# H4  = directional filter
-# H1  = setup filter
-# M15 = trigger
+# LEGACY:
+#
+# H4 / H1 / M15
 # ============================================================
 
 def mtf_allows_signal(
@@ -366,11 +411,9 @@ def mtf_allows_signal(
     mtf_confirmation
 ):
 
-    if (
-        not isinstance(
-            mtf_confirmation,
-            dict
-        )
+    if not isinstance(
+        mtf_confirmation,
+        dict
     ):
         return False
 
@@ -379,10 +422,12 @@ def mtf_allows_signal(
         {}
     )
 
+    signal = str(
+        signal
+    ).upper()
+
     # ========================================================
-    # NEW ARCHITECTURE
-    #
-    # H1 → M15 → M1
+    # PRIMARY H1 / M15 / M1
     # ========================================================
 
     if "M1" in trends:
@@ -421,12 +466,7 @@ def mtf_allows_signal(
         return False
 
     # ========================================================
-    # LEGACY ARCHITECTURE
-    #
-    # H4 → H1 → M15
-    #
-    # Dipertahankan agar test lama / modul lama
-    # tidak rusak.
+    # LEGACY H4 / H1 / M15
     # ========================================================
 
     if "H4" in trends:
@@ -469,8 +509,6 @@ def mtf_allows_signal(
 
 # ============================================================
 # MTF BIAS
-#
-# Used when we only need H1 + M15 direction.
 # ============================================================
 
 def mtf_bias(
@@ -549,13 +587,21 @@ def mtf_diagnostic(
     aligned_buy = (
         h1 == "BUY"
         and m15 == "BUY"
-        and m1 == "BUY"
+        and (
+            m1 == "BUY"
+            if "M1" in trends
+            else True
+        )
     )
 
     aligned_sell = (
         h1 == "SELL"
         and m15 == "SELL"
-        and m1 == "SELL"
+        and (
+            m1 == "SELL"
+            if "M1" in trends
+            else True
+        )
     )
 
     return {
