@@ -1,4 +1,5 @@
 MetaTrader5
 pandas
+yfinance
 numpy
 python-dotenv
