@@ -347,6 +347,20 @@ def build_mtf_confirmation(
 # M1 = trigger
 # ============================================================
 
+# ============================================================
+# MTF ENTRY PERMISSION
+#
+# NEW ARCHITECTURE
+# H1  = directional filter
+# M15 = setup filter
+# M1  = trigger
+#
+# LEGACY COMPATIBILITY
+# H4  = directional filter
+# H1  = setup filter
+# M15 = trigger
+# ============================================================
+
 def mtf_allows_signal(
     signal,
     mtf_confirmation
@@ -365,48 +379,90 @@ def mtf_allows_signal(
         {}
     )
 
-    h1 = trends.get(
-        "H1",
-        "HOLD"
-    )
-
-    m15 = trends.get(
-        "M15",
-        "HOLD"
-    )
-
-    m1 = trends.get(
-        "M1",
-        "HOLD"
-    )
-
     # ========================================================
-    # BUY
+    # NEW ARCHITECTURE
     #
-    # H1 must be BUY
-    # M15 must be BUY
-    # M1 must be BUY
+    # H1 → M15 → M1
     # ========================================================
 
-    if signal == "BUY":
+    if "M1" in trends:
 
-        return (
-            h1 == "BUY"
-            and m15 == "BUY"
-            and m1 == "BUY"
+        h1 = trends.get(
+            "H1",
+            "HOLD"
         )
 
-    # ========================================================
-    # SELL
-    # ========================================================
-
-    if signal == "SELL":
-
-        return (
-            h1 == "SELL"
-            and m15 == "SELL"
-            and m1 == "SELL"
+        m15 = trends.get(
+            "M15",
+            "HOLD"
         )
+
+        m1 = trends.get(
+            "M1",
+            "HOLD"
+        )
+
+        if signal == "BUY":
+
+            return (
+                h1 == "BUY"
+                and m15 == "BUY"
+                and m1 == "BUY"
+            )
+
+        if signal == "SELL":
+
+            return (
+                h1 == "SELL"
+                and m15 == "SELL"
+                and m1 == "SELL"
+            )
+
+        return False
+
+    # ========================================================
+    # LEGACY ARCHITECTURE
+    #
+    # H4 → H1 → M15
+    #
+    # Dipertahankan agar test lama / modul lama
+    # tidak rusak.
+    # ========================================================
+
+    if "H4" in trends:
+
+        h4 = trends.get(
+            "H4",
+            "HOLD"
+        )
+
+        h1 = trends.get(
+            "H1",
+            "HOLD"
+        )
+
+        m15 = trends.get(
+            "M15",
+            "HOLD"
+        )
+
+        if signal == "BUY":
+
+            return (
+                h4 == "BUY"
+                and h1 == "BUY"
+                and m15 == "BUY"
+            )
+
+        if signal == "SELL":
+
+            return (
+                h4 == "SELL"
+                and h1 == "SELL"
+                and m15 == "SELL"
+            )
+
+        return False
 
     return False
 
