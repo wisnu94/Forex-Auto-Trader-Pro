@@ -115,7 +115,7 @@ def calculate_momentum(df):
     return float(momentum)
 
 # ============================================================
-# PRECISION ENTRY FILTER
+# PRECISION ENTRY FILTER V2
 # ============================================================
 
 def precision_entry_filter(
@@ -125,22 +125,32 @@ def precision_entry_filter(
     momentum,
     atr_value,
     close,
-    ema_fast
+    ema_fast,
+    ema_slow
 ):
     if signal == "BUY":
 
+        # 1. Trend wajib bullish
         if trend != "BULLISH":
             return False
 
+        # 2. Wajib bullish breakout
         if structure != "BULLISH_BREAK":
             return False
 
+        # 3. Momentum harus positif
         if momentum <= 0:
             return False
 
+        # 4. Harga harus di atas EMA fast
         if close <= ema_fast:
             return False
 
+        # 5. EMA fast harus di atas EMA slow
+        if ema_fast <= ema_slow:
+            return False
+
+        # 6. ATR wajib valid
         if atr_value is None or atr_value <= 0:
             return False
 
@@ -148,18 +158,27 @@ def precision_entry_filter(
 
     if signal == "SELL":
 
+        # 1. Trend wajib bearish
         if trend != "BEARISH":
             return False
 
+        # 2. Wajib bearish breakout
         if structure != "BEARISH_BREAK":
             return False
 
+        # 3. Momentum harus negatif
         if momentum >= 0:
             return False
 
+        # 4. Harga harus di bawah EMA fast
         if close >= ema_fast:
             return False
 
+        # 5. EMA fast harus di bawah EMA slow
+        if ema_fast >= ema_slow:
+            return False
+
+        # 6. ATR wajib valid
         if atr_value is None or atr_value <= 0:
             return False
 
@@ -438,6 +457,7 @@ def generate_signal(
         ),
         close=float(last["close"]),
         ema_fast=float(last["ema_fast"])
+        ema_slow=float(last["ema_slow"])
     )
 
     if signal != "HOLD" and not precision_pass:
