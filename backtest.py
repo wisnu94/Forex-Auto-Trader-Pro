@@ -765,7 +765,7 @@ def analyze_grades(trades):
 
 def analyze_signals(trades):
     
-            result[signal] = {
+        result[signal] = {
             "trades": total,
             "wins": wins,
             "win_rate": round(
