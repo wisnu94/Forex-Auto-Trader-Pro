@@ -41,9 +41,34 @@ def calculate_atr(df, period=14):
     ).mean()
 
 
-# ============================================================
-# ADX
-# ============================================================
+def calculate_rsi(series, period=14):
+
+    delta = series.diff()
+
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    avg_gain = gain.ewm(
+        alpha=1 / period,
+        adjust=False
+    ).mean()
+
+    avg_loss = loss.ewm(
+        alpha=1 / period,
+        adjust=False
+    ).mean()
+
+    rs = avg_gain / avg_loss.replace(
+        0,
+        np.nan
+    )
+
+    rsi = 100 - (
+        100 / (1 + rs)
+    )
+
+    return rsi.fillna(50.0)
+
 
 def calculate_adx(df, period=14):
 
@@ -56,7 +81,8 @@ def calculate_adx(df, period=14):
 
     plus_dm = pd.Series(
         np.where(
-            (up_move > down_move) & (up_move > 0),
+            (up_move > down_move)
+            & (up_move > 0),
             up_move,
             0.0
         ),
@@ -65,7 +91,8 @@ def calculate_adx(df, period=14):
 
     minus_dm = pd.Series(
         np.where(
-            (down_move > up_move) & (down_move > 0),
+            (down_move > up_move)
+            & (down_move > 0),
             down_move,
             0.0
         ),
@@ -73,10 +100,16 @@ def calculate_adx(df, period=14):
     )
 
     tr1 = high - low
-    tr2 = (high - close.shift(1)).abs()
-    tr3 = (low - close.shift(1)).abs()
 
-    true_range = pd.concat(
+    tr2 = (
+        high - close.shift(1)
+    ).abs()
+
+    tr3 = (
+        low - close.shift(1)
+    ).abs()
+
+    tr = pd.concat(
         [
             tr1,
             tr2,
@@ -85,35 +118,48 @@ def calculate_adx(df, period=14):
         axis=1
     ).max(axis=1)
 
-    atr = true_range.rolling(
-        period
+    atr = tr.ewm(
+        alpha=1 / period,
+        adjust=False
     ).mean()
 
     plus_di = (
         100
-        * plus_dm.rolling(period).mean()
+        * plus_dm.ewm(
+            alpha=1 / period,
+            adjust=False
+        ).mean()
         / atr.replace(0, np.nan)
     )
 
     minus_di = (
         100
-        * minus_dm.rolling(period).mean()
+        * minus_dm.ewm(
+            alpha=1 / period,
+            adjust=False
+        ).mean()
         / atr.replace(0, np.nan)
     )
-
-    denominator = (
-        plus_di + minus_di
-    ).replace(0, np.nan)
 
     dx = (
         100
         * (plus_di - minus_di).abs()
-        / denominator
+        / (plus_di + minus_di).replace(
+            0,
+            np.nan
+        )
     )
 
-    return dx.rolling(
-        period
+    adx = dx.ewm(
+        alpha=1 / period,
+        adjust=False
     ).mean()
+
+    return (
+        adx.fillna(0.0),
+        plus_di.fillna(0.0),
+        minus_di.fillna(0.0)
+    )
 
 
 # ============================================================
@@ -143,11 +189,7 @@ def detect_structure(df):
 # TREND ENGINE
 # ============================================================
 
-def detect_trend(
-    df,
-    fast=20,
-    slow=50
-):
+def detect_trend(df, fast=20, slow=50):
 
     data = df.copy()
 
@@ -173,6 +215,41 @@ def detect_trend(
 
 
 # ============================================================
+# EMA SLOPE ENGINE
+# ============================================================
+
+def calculate_ema_slope(
+    df,
+    fast=20,
+    lookback=5
+):
+
+    ema = calculate_ema(
+        df["close"],
+        fast
+    )
+
+    if len(ema) <= lookback:
+        return 0.0
+
+    current = float(
+        ema.iloc[-1]
+    )
+
+    previous = float(
+        ema.iloc[-1 - lookback]
+    )
+
+    if previous == 0:
+        return 0.0
+
+    return (
+        (current - previous)
+        / previous
+    ) * 100
+
+
+# ============================================================
 # MOMENTUM
 # ============================================================
 
@@ -181,212 +258,100 @@ def calculate_momentum(df):
     if len(df) < 5:
         return 0.0
 
-    current = df["close"].iloc[-1]
-    previous = df["close"].iloc[-5]
+    current = float(
+        df["close"].iloc[-1]
+    )
+
+    previous = float(
+        df["close"].iloc[-5]
+    )
 
     if previous == 0:
         return 0.0
 
-    return float(
-        ((current - previous) / previous) * 100
+    return (
+        (current - previous)
+        / previous
+    ) * 100
+
+
+# ============================================================
+# CANDLE QUALITY
+# ============================================================
+
+def calculate_candle_quality(df):
+
+    candle = df.iloc[-1]
+
+    high = float(candle["high"])
+    low = float(candle["low"])
+    close = float(candle["close"])
+    open_price = float(candle["open"])
+
+    candle_range = high - low
+
+    if candle_range <= 0:
+        return 0.0
+
+    body = abs(
+        close - open_price
     )
 
+    return body / candle_range
+
 
 # ============================================================
-# BREAKOUT STRENGTH
+# BREAKOUT QUALITY
 # ============================================================
 
-def calculate_breakout_strength(
+def calculate_breakout_quality(
     df,
-    signal,
-    atr_value
+    signal
 ):
 
-    if len(df) < 5:
-        return 0.0
+    if len(df) < 6:
+        return False
 
-    previous_high = df["high"].iloc[-5:-1].max()
-    previous_low = df["low"].iloc[-5:-1].min()
+    candle = df.iloc[-1]
 
-    close = float(df["close"].iloc[-1])
+    high = float(candle["high"])
+    low = float(candle["low"])
+    close = float(candle["close"])
+    open_price = float(candle["open"])
 
-    if atr_value is None or atr_value <= 0:
-        return 0.0
+    candle_range = high - low
+
+    if candle_range <= 0:
+        return False
+
+    body = abs(
+        close - open_price
+    )
+
+    body_ratio = (
+        body / candle_range
+    )
+
+    recent_high = df["high"].iloc[-5:-1].max()
+    recent_low = df["low"].iloc[-5:-1].min()
 
     if signal == "BUY":
 
-        breakout_distance = (
-            close - previous_high
+        return (
+            close > recent_high
+            and close > open_price
+            and body_ratio >= 0.55
         )
 
-    elif signal == "SELL":
+    if signal == "SELL":
 
-        breakout_distance = (
-            previous_low - close
+        return (
+            close < recent_low
+            and close < open_price
+            and body_ratio >= 0.55
         )
 
-    else:
-        return 0.0
-
-    if breakout_distance <= 0:
-        return 0.0
-
-    return float(
-        breakout_distance / atr_value
-    )
-
-
-# ============================================================
-# EMA SEPARATION
-# ============================================================
-
-def calculate_ema_separation(
-    close,
-    ema_fast,
-    ema_slow
-):
-
-    if close == 0:
-        return 0.0
-
-    return float(
-        abs(ema_fast - ema_slow)
-        / close
-        * 100
-    )
-
-
-# ============================================================
-# PRECISION SCORE V3
-# ============================================================
-
-def calculate_precision_score(
-    signal,
-    trend,
-    structure,
-    momentum,
-    atr_value,
-    close,
-    ema_fast,
-    ema_slow,
-    adx_value=None,
-    breakout_strength=0.0,
-    ema_separation=0.0,
-    mtf_confirmation=None
-):
-
-    if signal == "HOLD":
-        return 0
-
-    score = 0
-
-    # ========================================================
-    # 1. TREND ALIGNMENT — 20 POINTS
-    # ========================================================
-
-    if signal == "BUY" and trend == "BULLISH":
-        score += 20
-
-    elif signal == "SELL" and trend == "BEARISH":
-        score += 20
-
-    # ========================================================
-    # 2. STRUCTURE — 20 POINTS
-    # ========================================================
-
-    if signal == "BUY" and structure == "BULLISH_BREAK":
-        score += 20
-
-    elif signal == "SELL" and structure == "BEARISH_BREAK":
-        score += 20
-
-    # ========================================================
-    # 3. ADX STRENGTH — 20 POINTS
-    # ========================================================
-
-    if adx_value is not None:
-
-        if adx_value >= 30:
-            score += 20
-
-        elif adx_value >= 25:
-            score += 15
-
-        elif adx_value >= 20:
-            score += 10
-
-    # ========================================================
-    # 4. BREAKOUT STRENGTH — 15 POINTS
-    # ========================================================
-
-    if breakout_strength >= 1.0:
-        score += 15
-
-    elif breakout_strength >= 0.50:
-        score += 10
-
-    elif breakout_strength > 0:
-        score += 5
-
-    # ========================================================
-    # 5. MOMENTUM STRENGTH — 10 POINTS
-    # ========================================================
-
-    if signal == "BUY" and momentum > 0.05:
-        score += 10
-
-    elif signal == "SELL" and momentum < -0.05:
-        score += 10
-
-    elif (
-        signal == "BUY"
-        and momentum > 0
-    ):
-        score += 5
-
-    elif (
-        signal == "SELL"
-        and momentum < 0
-    ):
-        score += 5
-
-    # ========================================================
-    # 6. EMA SEPARATION — 10 POINTS
-    # ========================================================
-
-    if ema_separation >= 0.20:
-        score += 10
-
-    elif ema_separation >= 0.10:
-        score += 7
-
-    elif ema_separation >= 0.05:
-        score += 4
-
-    # ========================================================
-    # 7. MTF CONFIRMATION — 5 POINTS
-    # ========================================================
-
-    if mtf_confirmation is not None:
-
-        mtf_status = mtf_confirmation.get(
-            "status",
-            "UNKNOWN"
-        )
-
-        if (
-            signal == "BUY"
-            and mtf_status == "STRONG_BUY"
-        ):
-            score += 5
-
-        elif (
-            signal == "SELL"
-            and mtf_status == "STRONG_SELL"
-        ):
-            score += 5
-
-    return min(score, 100)
+    return False
 
 
 # ============================================================
@@ -402,11 +367,14 @@ def precision_entry_filter(
     close,
     ema_fast,
     ema_slow,
-    precision_score
+    rsi,
+    adx,
+    plus_di,
+    minus_di,
+    ema_slope,
+    candle_quality,
+    breakout_quality
 ):
-
-    if signal == "HOLD":
-        return False
 
     if signal == "BUY":
 
@@ -425,7 +393,30 @@ def precision_entry_filter(
         if ema_fast <= ema_slow:
             return False
 
-    elif signal == "SELL":
+        if ema_slope <= 0:
+            return False
+
+        if rsi < 55 or rsi > 72:
+            return False
+
+        if adx < 20:
+            return False
+
+        if plus_di <= minus_di:
+            return False
+
+        if candle_quality < 0.55:
+            return False
+
+        if not breakout_quality:
+            return False
+
+        if atr_value is None or atr_value <= 0:
+            return False
+
+        return True
+
+    if signal == "SELL":
 
         if trend != "BEARISH":
             return False
@@ -442,25 +433,249 @@ def precision_entry_filter(
         if ema_fast >= ema_slow:
             return False
 
-    else:
-        return False
+        if ema_slope >= 0:
+            return False
 
-    if atr_value is None or atr_value <= 0:
-        return False
+        if rsi > 45 or rsi < 28:
+            return False
 
-    # ========================================================
-    # IMPORTANT:
-    # Minimum precision threshold
-    # ========================================================
+        if adx < 20:
+            return False
 
-    if precision_score < 70:
-        return False
+        if minus_di <= plus_di:
+            return False
 
-    return True
+        if candle_quality < 0.55:
+            return False
+
+        if not breakout_quality:
+            return False
+
+        if atr_value is None or atr_value <= 0:
+            return False
+
+        return True
+
+    return False
 
 
 # ============================================================
-# GRADE
+# PRECISION SCORE ENGINE
+# ============================================================
+
+def calculate_precision_score(
+    signal,
+    trend,
+    structure,
+    momentum,
+    atr_value,
+    close,
+    ema_fast,
+    ema_slow,
+    rsi,
+    adx,
+    plus_di,
+    minus_di,
+    ema_slope,
+    candle_quality,
+    breakout_quality,
+    mtf_confirmation=None
+):
+
+    score = 0
+
+    # --------------------------------------------------------
+    # MTF — 15 POINTS
+    # --------------------------------------------------------
+
+    if mtf_confirmation is not None:
+
+        mtf_status = mtf_confirmation.get(
+            "status",
+            "UNKNOWN"
+        )
+
+        if (
+            signal == "BUY"
+            and mtf_status == "STRONG_BUY"
+        ):
+            score += 15
+
+        elif (
+            signal == "SELL"
+            and mtf_status == "STRONG_SELL"
+        ):
+            score += 15
+
+    # --------------------------------------------------------
+    # TREND — 15 POINTS
+    # --------------------------------------------------------
+
+    if (
+        signal == "BUY"
+        and trend == "BULLISH"
+    ):
+        score += 15
+
+    elif (
+        signal == "SELL"
+        and trend == "BEARISH"
+    ):
+        score += 15
+
+    # --------------------------------------------------------
+    # STRUCTURE — 15 POINTS
+    # --------------------------------------------------------
+
+    if (
+        signal == "BUY"
+        and structure == "BULLISH_BREAK"
+    ):
+        score += 15
+
+    elif (
+        signal == "SELL"
+        and structure == "BEARISH_BREAK"
+    ):
+        score += 15
+
+    # --------------------------------------------------------
+    # MOMENTUM — 10 POINTS
+    # --------------------------------------------------------
+
+    if (
+        signal == "BUY"
+        and momentum > 0
+    ):
+        score += 10
+
+    elif (
+        signal == "SELL"
+        and momentum < 0
+    ):
+        score += 10
+
+    # --------------------------------------------------------
+    # EMA POSITION — 10 POINTS
+    # --------------------------------------------------------
+
+    if (
+        signal == "BUY"
+        and close > ema_fast
+        and ema_fast > ema_slow
+    ):
+        score += 10
+
+    elif (
+        signal == "SELL"
+        and close < ema_fast
+        and ema_fast < ema_slow
+    ):
+        score += 10
+
+    # --------------------------------------------------------
+    # EMA SLOPE — 10 POINTS
+    # --------------------------------------------------------
+
+    if (
+        signal == "BUY"
+        and ema_slope > 0
+    ):
+        score += 10
+
+    elif (
+        signal == "SELL"
+        and ema_slope < 0
+    ):
+        score += 10
+
+    # --------------------------------------------------------
+    # RSI — 10 POINTS
+    # --------------------------------------------------------
+
+    if signal == "BUY":
+
+        if 55 <= rsi <= 72:
+            score += 10
+
+        elif 50 <= rsi < 55:
+            score += 5
+
+    elif signal == "SELL":
+
+        if 28 <= rsi <= 45:
+            score += 10
+
+        elif 45 < rsi <= 50:
+            score += 5
+
+    # --------------------------------------------------------
+    # ADX + DI — 10 POINTS
+    # --------------------------------------------------------
+
+    if adx >= 25:
+
+        if (
+            signal == "BUY"
+            and plus_di > minus_di
+        ):
+            score += 10
+
+        elif (
+            signal == "SELL"
+            and minus_di > plus_di
+        ):
+            score += 10
+
+    elif adx >= 20:
+
+        if (
+            signal == "BUY"
+            and plus_di > minus_di
+        ):
+            score += 5
+
+        elif (
+            signal == "SELL"
+            and minus_di > plus_di
+        ):
+            score += 5
+
+    # --------------------------------------------------------
+    # CANDLE QUALITY — 5 POINTS
+    # --------------------------------------------------------
+
+    if candle_quality >= 0.70:
+        score += 5
+
+    elif candle_quality >= 0.55:
+        score += 3
+
+    # --------------------------------------------------------
+    # BREAKOUT QUALITY — 5 POINTS
+    # --------------------------------------------------------
+
+    if breakout_quality:
+        score += 5
+
+    # --------------------------------------------------------
+    # ATR — 5 POINTS
+    # --------------------------------------------------------
+
+    if (
+        atr_value is not None
+        and atr_value > 0
+    ):
+        score += 5
+
+    return min(
+        int(score),
+        100
+    )
+
+
+# ============================================================
+# PRECISION GRADE
 # ============================================================
 
 def get_precision_grade(score):
@@ -481,7 +696,7 @@ def get_precision_grade(score):
 
 
 # ============================================================
-# DECISION
+# PRECISION DECISION
 # ============================================================
 
 def get_precision_decision(
@@ -533,12 +748,15 @@ def generate_signal(
 ):
 
     minimum_bars = max(
-        ema_slow + 10,
-        atr_period * 2 + 10,
-        50
+        ema_slow + 20,
+        atr_period + 20,
+        80
     )
 
-    if len(df) < minimum_bars:
+    if (
+        df is None
+        or len(df) < minimum_bars
+    ):
 
         return {
             "signal": "HOLD",
@@ -546,20 +764,20 @@ def generate_signal(
             "structure": "UNKNOWN",
             "momentum": 0.0,
             "atr": None,
-            "adx": None,
-            "breakout_strength": 0.0,
-            "ema_separation": 0.0,
+            "precision_pass": False,
             "precision_score": 0,
             "precision_grade": "D",
-            "precision_pass": False,
             "precision_decision": "NO_TRADE",
+            "mtf_status": "NOT_CHECKED",
+            "buy_score": 0,
+            "sell_score": 0,
             "score": 0
         }
 
     data = df.copy()
 
     # --------------------------------------------------------
-    # INDICATORS
+    # CORE INDICATORS
     # --------------------------------------------------------
 
     data["ema_fast"] = calculate_ema(
@@ -577,27 +795,24 @@ def generate_signal(
         atr_period
     )
 
-    data["adx"] = calculate_adx(
+    data["rsi"] = calculate_rsi(
+        data["close"],
+        14
+    )
+
+    (
+        data["adx"],
+        data["plus_di"],
+        data["minus_di"]
+    ) = calculate_adx(
         data,
-        atr_period
+        14
     )
 
     last = data.iloc[-1]
 
-    atr_value = (
-        float(last["atr"])
-        if pd.notna(last["atr"])
-        else None
-    )
-
-    adx_value = (
-        float(last["adx"])
-        if pd.notna(last["adx"])
-        else None
-    )
-
     # --------------------------------------------------------
-    # CORE ENGINES
+    # BASE ANALYSIS
     # --------------------------------------------------------
 
     trend = detect_trend(
@@ -614,52 +829,128 @@ def generate_signal(
         data
     )
 
+    atr_value = (
+        float(last["atr"])
+        if pd.notna(last["atr"])
+        else None
+    )
+
+    close = float(
+        last["close"]
+    )
+
+    ema_fast_value = float(
+        last["ema_fast"]
+    )
+
+    ema_slow_value = float(
+        last["ema_slow"]
+    )
+
+    rsi = float(
+        last["rsi"]
+    )
+
+    adx = float(
+        last["adx"]
+    )
+
+    plus_di = float(
+        last["plus_di"]
+    )
+
+    minus_di = float(
+        last["minus_di"]
+    )
+
+    ema_slope = calculate_ema_slope(
+        data,
+        ema_fast,
+        5
+    )
+
+    candle_quality = (
+        calculate_candle_quality(
+            data
+        )
+    )
+
     # --------------------------------------------------------
-    # BASE SIGNAL
+    # PRELIMINARY SIGNAL
     # --------------------------------------------------------
 
     buy_score = 0
     sell_score = 0
 
+    # Trend
     if trend == "BULLISH":
-        buy_score += 30
+        buy_score += 25
 
     elif trend == "BEARISH":
-        sell_score += 30
+        sell_score += 25
 
+    # Structure
     if structure == "BULLISH_BREAK":
         buy_score += 30
 
     elif structure == "BEARISH_BREAK":
         sell_score += 30
 
+    # Momentum
     if momentum > 0:
         buy_score += 20
 
     elif momentum < 0:
         sell_score += 20
 
-    if last["close"] > last["ema_fast"]:
-        buy_score += 20
+    # Price / EMA
+    if close > ema_fast_value:
+        buy_score += 15
 
-    elif last["close"] < last["ema_fast"]:
-        sell_score += 20
+    elif close < ema_fast_value:
+        sell_score += 15
+
+    # ADX direction
+    if adx >= 20:
+
+        if plus_di > minus_di:
+            buy_score += 10
+
+        elif minus_di > plus_di:
+            sell_score += 10
 
     signal = "HOLD"
 
-    if buy_score >= 70 and buy_score > sell_score:
+    if (
+        buy_score >= 70
+        and buy_score > sell_score
+    ):
         signal = "BUY"
 
-    elif sell_score >= 70 and sell_score > buy_score:
+    elif (
+        sell_score >= 70
+        and sell_score > buy_score
+    ):
         signal = "SELL"
+
+    # --------------------------------------------------------
+    # BREAKOUT QUALITY
+    # --------------------------------------------------------
+
+    breakout_quality = (
+        calculate_breakout_quality(
+            data,
+            signal
+        )
+    )
 
     # --------------------------------------------------------
     # MTF FILTER
     # --------------------------------------------------------
 
     if (
-        signal != "HOLD"
-        and mtf_confirmation is not None
+        mtf_confirmation is not None
+        and signal != "HOLD"
     ):
 
         if not mtf_allows_signal(
@@ -669,71 +960,86 @@ def generate_signal(
             signal = "HOLD"
 
     # --------------------------------------------------------
-    # ADVANCED MEASUREMENTS
+    # PRECISION ENTRY FILTER
     # --------------------------------------------------------
 
-    breakout_strength = calculate_breakout_strength(
-        data,
-        signal,
-        atr_value
+    precision_pass = (
+        precision_entry_filter(
+            signal=signal,
+            trend=trend,
+            structure=structure,
+            momentum=momentum,
+            atr_value=atr_value,
+            close=close,
+            ema_fast=ema_fast_value,
+            ema_slow=ema_slow_value,
+            rsi=rsi,
+            adx=adx,
+            plus_di=plus_di,
+            minus_di=minus_di,
+            ema_slope=ema_slope,
+            candle_quality=candle_quality,
+            breakout_quality=breakout_quality
+        )
     )
 
-    ema_separation = calculate_ema_separation(
-        close=float(last["close"]),
-        ema_fast=float(last["ema_fast"]),
-        ema_slow=float(last["ema_slow"])
-    )
-
-    # --------------------------------------------------------
-    # PRECISION SCORE V3
-    # --------------------------------------------------------
-
-    precision_score = calculate_precision_score(
-        signal=signal,
-        trend=trend,
-        structure=structure,
-        momentum=momentum,
-        atr_value=atr_value,
-        close=float(last["close"]),
-        ema_fast=float(last["ema_fast"]),
-        ema_slow=float(last["ema_slow"]),
-        adx_value=adx_value,
-        breakout_strength=breakout_strength,
-        ema_separation=ema_separation,
-        mtf_confirmation=mtf_confirmation
-    )
-
-    # --------------------------------------------------------
-    # PRECISION FILTER
-    # --------------------------------------------------------
-
-    precision_pass = precision_entry_filter(
-        signal=signal,
-        trend=trend,
-        structure=structure,
-        momentum=momentum,
-        atr_value=atr_value,
-        close=float(last["close"]),
-        ema_fast=float(last["ema_fast"]),
-        ema_slow=float(last["ema_slow"]),
-        precision_score=precision_score
-    )
-
-    if signal != "HOLD" and not precision_pass:
+    if (
+        signal != "HOLD"
+        and not precision_pass
+    ):
         signal = "HOLD"
 
     # --------------------------------------------------------
-    # FINAL GRADE
+    # PRECISION SCORE
     # --------------------------------------------------------
 
-    precision_grade = get_precision_grade(
-        precision_score
+    precision_score = (
+        calculate_precision_score(
+            signal=signal,
+            trend=trend,
+            structure=structure,
+            momentum=momentum,
+            atr_value=atr_value,
+            close=close,
+            ema_fast=ema_fast_value,
+            ema_slow=ema_slow_value,
+            rsi=rsi,
+            adx=adx,
+            plus_di=plus_di,
+            minus_di=minus_di,
+            ema_slope=ema_slope,
+            candle_quality=candle_quality,
+            breakout_quality=breakout_quality,
+            mtf_confirmation=mtf_confirmation
+        )
     )
 
-    precision_decision = get_precision_decision(
-        signal=signal,
-        score=precision_score,
-        precision_pass=precision_pass
+    # --------------------------------------------------------
+    # FINAL PRECISION PASS
+    # --------------------------------------------------------
+
+    if (
+        signal != "HOLD"
+        and precision_score < 80
+    ):
+        signal = "HOLD"
+        precision_pass = False
+
+    elif signal == "HOLD":
+        precision_pass = False
+
+    precision_grade = (
+        get_precision_grade(
+            precision_score
+        )
+    )
+
+    precision_decision = (
+        get_precision_decision(
+            signal=signal,
+            score=precision_score,
+            precision_pass=precision_pass
+        )
     )
 
     # --------------------------------------------------------
@@ -741,15 +1047,30 @@ def generate_signal(
     # --------------------------------------------------------
 
     return {
+
         "signal": signal,
 
-        "precision_pass": precision_pass,
+        "precision_pass": (
+            precision_pass
+        ),
 
-        "precision_score": precision_score,
+        "precision_score": (
+            precision_score
+        ),
 
-        "precision_grade": precision_grade,
+        "precision_grade": (
+            precision_grade
+        ),
 
-        "precision_decision": precision_decision,
+        "precision_decision": (
+            precision_decision
+        ),
+
+        "mtf_status": (
+            mtf_confirmation["status"]
+            if mtf_confirmation is not None
+            else "NOT_CHECKED"
+        ),
 
         "trend": trend,
 
@@ -762,22 +1083,38 @@ def generate_signal(
 
         "atr": atr_value,
 
-        "adx": adx_value,
+        "rsi": round(
+            rsi,
+            2
+        ),
 
-        "breakout_strength": round(
-            breakout_strength,
+        "adx": round(
+            adx,
+            2
+        ),
+
+        "plus_di": round(
+            plus_di,
+            2
+        ),
+
+        "minus_di": round(
+            minus_di,
+            2
+        ),
+
+        "ema_slope": round(
+            ema_slope,
+            5
+        ),
+
+        "candle_quality": round(
+            candle_quality,
             4
         ),
 
-        "ema_separation": round(
-            ema_separation,
-            4
-        ),
-
-        "mtf_status": (
-            mtf_confirmation["status"]
-            if mtf_confirmation is not None
-            else "NOT_CHECKED"
+        "breakout_quality": (
+            breakout_quality
         ),
 
         "buy_score": buy_score,
