@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   validate:
@@ -29,6 +30,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
       # ======================================================
       # INSTALL DEPENDENCIES
@@ -37,7 +39,18 @@ jobs:
       - name: Install CI dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy python-dotenv
+          python -m pip install -r requirements.txt
+
+      # ======================================================
+      # VERIFY DEPENDENCIES
+      # ======================================================
+
+      - name: Verify dependencies
+        run: |
+          python -c "import pandas; print('pandas OK')"
+          python -c "import numpy; print('numpy OK')"
+          python -c "import yfinance; print('yfinance OK')"
+          python -c "import dotenv; print('python-dotenv OK')"
 
       # ======================================================
       # COMPILE CHECK
@@ -120,10 +133,6 @@ jobs:
           import numpy as np
           import mtf
 
-          # --------------------------------------------------
-          # CREATE SYNTHETIC BULLISH DATA
-          # --------------------------------------------------
-
           rows = 150
 
           close = np.linspace(
@@ -142,10 +151,6 @@ jobs:
               "real_volume": np.zeros(rows),
           })
 
-          # --------------------------------------------------
-          # TEST TREND DETECTION
-          # --------------------------------------------------
-
           trend = mtf.timeframe_trend(
               df,
               fast_period=20,
@@ -155,10 +160,6 @@ jobs:
           assert trend == "BUY"
 
           print("MTF trend detection: PASS")
-
-          # --------------------------------------------------
-          # TEST SCORE
-          # --------------------------------------------------
 
           trends = {
               "H4": "BUY",
@@ -174,10 +175,6 @@ jobs:
 
           print("MTF score test: PASS")
           print("Score:", score)
-
-          # --------------------------------------------------
-          # TEST CONFIRMATION STATUS
-          # --------------------------------------------------
 
           confirmation = {
               "trends": trends,
@@ -196,7 +193,6 @@ jobs:
           )
 
           print("MTF signal filter: PASS")
-
           print()
           print("MTF ENGINE TEST: PASS")
           PY
@@ -213,10 +209,6 @@ jobs:
               calculate_position_size_mt5
           )
 
-          # --------------------------------------------------
-          # TEST SL / TP
-          # --------------------------------------------------
-
           levels = calculate_sl_tp(
               signal="BUY",
               entry_price=1.1000,
@@ -226,14 +218,8 @@ jobs:
           )
 
           assert levels is not None
-
           assert levels["sl"] < levels["entry"]
-
           assert levels["tp"] > levels["entry"]
-
-          # --------------------------------------------------
-          # TEST POSITION SIZE
-          # --------------------------------------------------
 
           volume = calculate_position_size_mt5(
               equity=10000,
@@ -256,40 +242,9 @@ jobs:
           PY
 
       # ======================================================
-      # BACKTEST ENGINE
+      # REAL-DATA BACKTEST
       # ======================================================
 
-name: Forex Auto Trader Pro
-
-on:
-  push:
-  workflow_dispatch:
-
-jobs:
-  backtest:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-
-      - name: Verify dependencies
-        run: |
-          python -c "import pandas; print('pandas OK')"
-          python -c "import numpy; print('numpy OK')"
-          python -c "import yfinance; print('yfinance OK')"
-
-      - name: Run backtest
+      - name: Run real-data backtest
         run: |
           python run_backtest.py
