@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 
 from backtest import (
     backtest_strategy,
@@ -12,10 +11,20 @@ from config import (
     TIMEFRAME,
 )
 
+from data import get_bars
+
 
 # ============================================================
 # FOREX AUTO TRADER PRO
-# REAL-DATA READY BACKTEST ENGINE
+# REAL-DATA BACKTEST ENGINE V4
+#
+# REAL DATA SOURCE:
+# Yahoo Finance via data.py
+#
+# MTF ARCHITECTURE:
+# H1  = MARKET BIAS
+# M15 = SETUP CONFIRMATION
+# M1  = ENTRY TRIGGER / MTF CONFIRMATION
 # ============================================================
 
 BARS = 3000
@@ -26,92 +35,118 @@ MIN_SCORE = 70
 
 
 # ============================================================
-# LOAD DATA
+# LOAD REAL MARKET DATA
 # ============================================================
 
-def load_backtest_data():
+def load_real_market_data():
 
-    # --------------------------------------------------------
-    # Prioritas:
-    # 1. data.csv
-    # 2. backtest_data.csv
-    #
-    # File harus memiliki:
-    # open, high, low, close
-    # --------------------------------------------------------
+    if str(TIMEFRAME).upper() != "M15":
 
-    candidates = [
-        "data.csv",
-        "backtest_data.csv",
+        raise RuntimeError(
+            "REAL-DATA BACKTEST V4 membutuhkan "
+            "TIMEFRAME=M15 sebagai base timeframe."
+        )
+
+    print(
+        "Downloading REAL market data..."
+    )
+
+    print(
+        "Source           : Yahoo Finance"
+    )
+
+    print(
+        f"Symbol           : {SYMBOL}"
+    )
+
+    print(
+        f"Base timeframe   : {TIMEFRAME}"
+    )
+
+    df = get_bars(
+        symbol=SYMBOL,
+        timeframe=TIMEFRAME,
+        count=BARS,
+    )
+
+    if df is None or len(df) == 0:
+
+        raise RuntimeError(
+            "Yahoo Finance mengembalikan data kosong."
+        )
+
+    required = [
+        "open",
+        "high",
+        "low",
+        "close",
     ]
 
-    for filename in candidates:
+    missing = [
+        column
+        for column in required
+        if column not in df.columns
+    ]
 
-        try:
+    if missing:
 
-            df = pd.read_csv(
-                filename
-            )
+        raise RuntimeError(
+            f"Kolom market data hilang: {missing}"
+        )
 
-            required = [
-                "open",
-                "high",
-                "low",
-                "close",
-            ]
+    df = df.copy()
 
-            missing = [
-                col
-                for col in required
-                if col not in df.columns
-            ]
+    for column in required:
 
-            if missing:
-                continue
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce"
+        )
 
-            df = df.copy()
-
-            for col in required:
-
-                df[col] = pd.to_numeric(
-                    df[col],
-                    errors="coerce"
-                )
-
-            df = df.dropna(
-                subset=required
-            )
-
-            if len(df) < 100:
-
-                continue
-
-            df = df.reset_index(
-                drop=True
-            )
-
-            if len(df) > BARS:
-
-                df = df.iloc[
-                    -BARS:
-                ].reset_index(
-                    drop=True
-                )
-
-            return df, filename
-
-        except (
-            FileNotFoundError,
-            pd.errors.EmptyDataError,
-            pd.errors.ParserError,
-        ):
-
-            continue
-
-    return (
-        pd.DataFrame(),
-        None
+    df = df.dropna(
+        subset=required
     )
+
+    df = df.reset_index(
+        drop=True
+    )
+
+    if len(df) < 100:
+
+        raise RuntimeError(
+            f"Data real terlalu sedikit: {len(df)} candle."
+        )
+
+    return df
+
+
+# ============================================================
+# OHLC VALIDATION
+# ============================================================
+
+def validate_ohlc(df):
+
+    invalid = (
+        (df["high"] < df["low"])
+        |
+        (df["high"] < df["open"])
+        |
+        (df["high"] < df["close"])
+        |
+        (df["low"] > df["open"])
+        |
+        (df["low"] > df["close"])
+    )
+
+    invalid_count = int(
+        invalid.sum()
+    )
+
+    if invalid_count > 0:
+
+        raise RuntimeError(
+            f"Invalid OHLC rows: {invalid_count}"
+        )
 
 
 # ============================================================
@@ -129,7 +164,7 @@ def main():
     )
 
     print(
-        "REAL-DATA BACKTEST ENGINE"
+        "REAL-DATA BACKTEST ENGINE V4"
     )
 
     print("=" * 60)
@@ -155,7 +190,7 @@ def main():
     )
 
     print(
-        "M1               : ENTRY TRIGGER"
+        "M1               : ENTRY TRIGGER / CONFIRMATION"
     )
 
     print()
@@ -164,9 +199,13 @@ def main():
     # LOAD REAL DATA
     # --------------------------------------------------------
 
-    df, source = load_backtest_data()
+    try:
 
-    if source is None:
+        df = load_real_market_data()
+
+    except Exception as exc:
+
+        print()
 
         print(
             "❌ BACKTEST STOPPED"
@@ -175,51 +214,21 @@ def main():
         print("-" * 60)
 
         print(
-            "No real market data file found."
+            f"Reason: {exc}"
         )
 
         print()
 
         print(
-            "Expected one of:"
+            "Synthetic/random data is DISABLED."
         )
 
-        print(
-            "  data.csv"
-        )
+        raise
 
-        print(
-            "  backtest_data.csv"
-        )
-
-        print()
-
-        print(
-            "Required columns:"
-        )
-
-        print(
-            "  open, high, low, close"
-        )
-
-        print()
-
-        print(
-            "Synthetic/random data has been"
-        )
-
-        print(
-            "DISABLED intentionally."
-        )
-
-        return
-
-    # --------------------------------------------------------
-    # DATA VALIDATION
-    # --------------------------------------------------------
+    print()
 
     print(
-        f"Data Source      : {source}"
+        "Data Source      : Yahoo Finance"
     )
 
     print(
@@ -230,7 +239,21 @@ def main():
         f"Timeframe         : {TIMEFRAME}"
     )
 
+    if "time" in df.columns:
+
+        print(
+            f"First Candle      : {df.iloc[0]['time']}"
+        )
+
+        print(
+            f"Last Candle       : {df.iloc[-1]['time']}"
+        )
+
     print()
+
+    # --------------------------------------------------------
+    # OHLC VALIDATION
+    # --------------------------------------------------------
 
     print(
         "OHLC VALIDATION"
@@ -238,30 +261,17 @@ def main():
 
     print("-" * 60)
 
-    invalid = (
-        (df["high"] < df["low"])
-        |
-        (df["high"] < df["open"])
-        |
-        (df["high"] < df["close"])
-        |
-        (df["low"] > df["open"])
-        |
-        (df["low"] > df["close"])
-    )
+    try:
 
-    invalid_count = int(
-        invalid.sum()
-    )
+        validate_ohlc(df)
 
-    if invalid_count > 0:
+    except Exception as exc:
 
         print(
-            f"❌ Invalid OHLC rows: "
-            f"{invalid_count}"
+            f"❌ {exc}"
         )
 
-        return
+        raise
 
     print(
         "✅ OHLC structure valid"
@@ -354,10 +364,8 @@ def main():
 
         print(
             f"{grade:>2} | "
-            f"Trades: "
-            f"{data['trades']:>4} | "
-            f"Wins: "
-            f"{data['wins']:>4} | "
+            f"Trades: {data['trades']:>4} | "
+            f"Wins: {data['wins']:>4} | "
             f"Win Rate: "
             f"{data['win_rate']:>6.2f}%"
         )
@@ -384,10 +392,8 @@ def main():
 
         print(
             f"{signal:>4} | "
-            f"Trades: "
-            f"{data['trades']:>4} | "
-            f"Wins: "
-            f"{data['wins']:>4} | "
+            f"Trades: {data['trades']:>4} | "
+            f"Wins: {data['wins']:>4} | "
             f"Win Rate: "
             f"{data['win_rate']:>6.2f}%"
         )
