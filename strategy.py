@@ -445,7 +445,7 @@ def generate_signal(
     # PRECISION ENTRY FILTER
     # --------------------------------------------------------
 
-    precision_pass = precision_entry_filter(
+        precision_pass = precision_entry_filter(
         signal=signal,
         trend=trend,
         structure=structure,
@@ -456,7 +456,7 @@ def generate_signal(
             else None
         ),
         close=float(last["close"]),
-        ema_fast=float(last["ema_fast"])
+        ema_fast=float(last["ema_fast"]),
         ema_slow=float(last["ema_slow"])
     )
 
