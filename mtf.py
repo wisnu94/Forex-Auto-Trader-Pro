@@ -102,55 +102,103 @@ def calculate_mtf_score(trends):
     ):
         return 0
 
-    score = 0
-
     # ========================================================
-    # H1 — 40 POINTS
-    # ========================================================
-
-    h1 = trends.get(
-        "H1",
-        "HOLD"
-    )
-
-    if h1 == "BUY":
-        score += 40
-
-    elif h1 == "SELL":
-        score -= 40
-
-    # ========================================================
-    # M15 — 30 POINTS
+    # NEW ARCHITECTURE
+    #
+    # H1  = 40
+    # M15 = 30
+    # M1  = 30
     # ========================================================
 
-    m15 = trends.get(
-        "M15",
-        "HOLD"
-    )
+    if "M1" in trends:
 
-    if m15 == "BUY":
-        score += 30
+        score = 0
 
-    elif m15 == "SELL":
-        score -= 30
+        h1 = trends.get(
+            "H1",
+            "HOLD"
+        )
+
+        m15 = trends.get(
+            "M15",
+            "HOLD"
+        )
+
+        m1 = trends.get(
+            "M1",
+            "HOLD"
+        )
+
+        if h1 == "BUY":
+            score += 40
+
+        elif h1 == "SELL":
+            score -= 40
+
+        if m15 == "BUY":
+            score += 30
+
+        elif m15 == "SELL":
+            score -= 30
+
+        if m1 == "BUY":
+            score += 30
+
+        elif m1 == "SELL":
+            score -= 30
+
+        return int(score)
 
     # ========================================================
-    # M1 — 30 POINTS
+    # LEGACY COMPATIBILITY
+    #
+    # H4  = 40
+    # H1  = 30
+    # M15 = 30
+    #
+    # Supaya test lama dan modul lama tetap berjalan.
     # ========================================================
 
-    m1 = trends.get(
-        "M1",
-        "HOLD"
-    )
+    if "H4" in trends:
 
-    if m1 == "BUY":
-        score += 30
+        score = 0
 
-    elif m1 == "SELL":
-        score -= 30
+        h4 = trends.get(
+            "H4",
+            "HOLD"
+        )
 
-    return int(score)
+        h1 = trends.get(
+            "H1",
+            "HOLD"
+        )
 
+        m15 = trends.get(
+            "M15",
+            "HOLD"
+        )
+
+        if h4 == "BUY":
+            score += 40
+
+        elif h4 == "SELL":
+            score -= 40
+
+        if h1 == "BUY":
+            score += 30
+
+        elif h1 == "SELL":
+            score -= 30
+
+        if m15 == "BUY":
+            score += 30
+
+        elif m15 == "SELL":
+            score -= 30
+
+        return int(score)
+
+    return 0
 
 # ============================================================
 # MTF STATUS
