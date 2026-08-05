@@ -552,9 +552,8 @@ def precision_entry_filter(
 
     return True
 
-
 # ============================================================
-# PRECISION SCORE V3
+# PRECISION SCORE V4
 # ============================================================
 
 def calculate_precision_score(
@@ -576,10 +575,10 @@ def calculate_precision_score(
     if signal == "HOLD":
         return 0
 
-    score = 0
+    score = 0.0
 
     # --------------------------------------------------------
-    # MTF — 20 POINTS
+    # 1. MTF QUALITY — 20 POINTS
     # --------------------------------------------------------
 
     if mtf_confirmation is not None:
@@ -589,125 +588,242 @@ def calculate_precision_score(
             "UNKNOWN"
         )
 
-        if (
-            signal == "BUY"
-            and mtf_status == "STRONG_BUY"
-        ):
-            score += 20
+        if signal == "BUY":
 
-        elif (
-            signal == "SELL"
-            and mtf_status == "STRONG_SELL"
-        ):
-            score += 20
+            if mtf_status == "STRONG_BUY":
+                score += 20
 
-        elif (
-            signal == "BUY"
-            and mtf_status == "BUY"
-        ):
+            elif mtf_status == "BUY_BIAS":
+                score += 12
+
+            elif mtf_status == "BUY":
+                score += 10
+
+        elif signal == "SELL":
+
+            if mtf_status == "STRONG_SELL":
+                score += 20
+
+            elif mtf_status == "SELL_BIAS":
+                score += 12
+
+            elif mtf_status == "SELL":
+                score += 10
+
+    # --------------------------------------------------------
+    # 2. TREND QUALITY — 15 POINTS
+    # --------------------------------------------------------
+
+    if signal == "BUY":
+
+        if trend == "BULLISH":
+
+            if ema_slow > 0:
+
+                ema_spread = (
+                    ema_fast - ema_slow
+                ) / ema_slow
+
+                if ema_spread >= 0.003:
+                    score += 15
+
+                elif ema_spread >= 0.0015:
+                    score += 12
+
+                elif ema_spread > 0:
+                    score += 9
+
+    elif signal == "SELL":
+
+        if trend == "BEARISH":
+
+            if ema_slow > 0:
+
+                ema_spread = (
+                    ema_slow - ema_fast
+                ) / ema_slow
+
+                if ema_spread >= 0.003:
+                    score += 15
+
+                elif ema_spread >= 0.0015:
+                    score += 12
+
+                elif ema_spread > 0:
+                    score += 9
+
+    # --------------------------------------------------------
+    # 3. STRUCTURE QUALITY — 15 POINTS
+    # --------------------------------------------------------
+
+    if signal == "BUY":
+
+        if structure == "BULLISH_BREAK":
             score += 15
 
-        elif (
-            signal == "SELL"
-            and mtf_status == "SELL"
-        ):
+    elif signal == "SELL":
+
+        if structure == "BEARISH_BREAK":
             score += 15
 
     # --------------------------------------------------------
-    # TREND — 15 POINTS
+    # 4. RSI QUALITY — 10 POINTS
     # --------------------------------------------------------
 
-    if (
-        signal == "BUY"
-        and trend == "BULLISH"
-        and ema_fast > ema_slow
-    ):
-        score += 15
+    if rsi is not None and not pd.isna(rsi):
 
-    elif (
-        signal == "SELL"
-        and trend == "BEARISH"
-        and ema_fast < ema_slow
-    ):
-        score += 15
+        if signal == "BUY":
 
-    # --------------------------------------------------------
-    # STRUCTURE — 15 POINTS
-    # --------------------------------------------------------
+            if 55 <= rsi <= 65:
+                score += 10
 
-    if (
-        signal == "BUY"
-        and structure == "BULLISH_BREAK"
-    ):
-        score += 15
+            elif 52 <= rsi < 55:
+                score += 8
 
-    elif (
-        signal == "SELL"
-        and structure == "BEARISH_BREAK"
-    ):
-        score += 15
+            elif 65 < rsi <= 70:
+                score += 6
 
-    # --------------------------------------------------------
-    # RSI — 10 POINTS
-    # --------------------------------------------------------
+            elif 50 <= rsi < 52:
+                score += 4
 
-    if rsi_confirmation(
-        signal,
-        rsi
-    ):
-        score += 10
+        elif signal == "SELL":
+
+            if 35 <= rsi <= 45:
+                score += 10
+
+            elif 45 < rsi <= 48:
+                score += 8
+
+            elif 30 <= rsi < 35:
+                score += 6
+
+            elif 48 < rsi <= 50:
+                score += 4
 
     # --------------------------------------------------------
-    # ADX — 10 POINTS
+    # 5. ADX QUALITY — 10 POINTS
     # --------------------------------------------------------
 
-    if adx_confirmation(
-        signal,
-        adx
-    ):
-        score += 10
+    if adx is not None and not pd.isna(adx):
+
+        if adx >= 30:
+            score += 10
+
+        elif adx >= 25:
+            score += 8
+
+        elif adx >= 22:
+            score += 6
+
+        elif adx >= 18:
+            score += 4
 
     # --------------------------------------------------------
-    # MOMENTUM — 10 POINTS
+    # 6. MOMENTUM QUALITY — 10 POINTS
     # --------------------------------------------------------
+
+    momentum_strength = abs(
+        float(momentum)
+    )
 
     if signal == "BUY" and momentum > 0:
-        score += 10
+
+        if momentum_strength >= 0.30:
+            score += 10
+
+        elif momentum_strength >= 0.15:
+            score += 8
+
+        elif momentum_strength >= 0.05:
+            score += 6
+
+        else:
+            score += 3
 
     elif signal == "SELL" and momentum < 0:
-        score += 10
+
+        if momentum_strength >= 0.30:
+            score += 10
+
+        elif momentum_strength >= 0.15:
+            score += 8
+
+        elif momentum_strength >= 0.05:
+            score += 6
+
+        else:
+            score += 3
 
     # --------------------------------------------------------
-    # CANDLE — 5 POINTS
+    # 7. CANDLE QUALITY — 5 POINTS
     # --------------------------------------------------------
 
     if candle_confirmed:
+
+        # Basic confirmation.
+        # Detailed candle strength remains
+        # inside candle_confirmation().
         score += 5
 
     # --------------------------------------------------------
-    # EMA LOCATION — 5 POINTS
+    # 8. EMA LOCATION QUALITY — 5 POINTS
     # --------------------------------------------------------
 
-    if ema_distance_confirmation(
-        signal,
-        close,
-        ema_fast,
-        atr_value
+    if (
+        atr_value is not None
+        and not pd.isna(atr_value)
+        and atr_value > 0
     ):
-        score += 5
+
+        distance = abs(
+            close - ema_fast
+        )
+
+        distance_atr = (
+            distance
+            / atr_value
+        )
+
+        if distance_atr <= 0.50:
+            score += 5
+
+        elif distance_atr <= 1.00:
+            score += 4
+
+        elif distance_atr <= 1.50:
+            score += 3
 
     # --------------------------------------------------------
-    # VOLATILITY — 5 POINTS
+    # 9. VOLATILITY QUALITY — 5 POINTS
     # --------------------------------------------------------
 
-    if volatility_confirmation(
-        atr_value,
-        atr_average
+    if (
+        atr_value is not None
+        and atr_average is not None
+        and not pd.isna(atr_value)
+        and not pd.isna(atr_average)
+        and atr_average > 0
     ):
-        score += 5
+
+        volatility_ratio = (
+            atr_value
+            / atr_average
+        )
+
+        if 0.90 <= volatility_ratio <= 1.50:
+            score += 5
+
+        elif 0.75 <= volatility_ratio < 0.90:
+            score += 4
+
+        elif 1.50 < volatility_ratio <= 2.00:
+            score += 3
+
+        elif 0.70 <= volatility_ratio < 0.75:
+            score += 2
 
     return min(
-        int(score),
+        int(round(score)),
         100
     )
 
