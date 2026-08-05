@@ -14,81 +14,104 @@ from config import (
 
 
 # ============================================================
-# BACKTEST SETTINGS
+# FOREX AUTO TRADER PRO
+# REAL-DATA READY BACKTEST ENGINE
 # ============================================================
 
 BARS = 3000
 
 ATR_SL_MULTIPLIER = 1.5
 REWARD_RISK = 2.0
-
 MIN_SCORE = 70
 
 
 # ============================================================
-# SYNTHETIC BACKTEST DATA
+# LOAD DATA
 # ============================================================
 
-def create_backtest_data(bars=3000):
+def load_backtest_data():
 
-    rng = np.random.default_rng(42)
+    # --------------------------------------------------------
+    # Prioritas:
+    # 1. data.csv
+    # 2. backtest_data.csv
+    #
+    # File harus memiliki:
+    # open, high, low, close
+    # --------------------------------------------------------
 
-    returns = rng.normal(
-        loc=0.00005,
-        scale=0.001,
-        size=bars
+    candidates = [
+        "data.csv",
+        "backtest_data.csv",
+    ]
+
+    for filename in candidates:
+
+        try:
+
+            df = pd.read_csv(
+                filename
+            )
+
+            required = [
+                "open",
+                "high",
+                "low",
+                "close",
+            ]
+
+            missing = [
+                col
+                for col in required
+                if col not in df.columns
+            ]
+
+            if missing:
+                continue
+
+            df = df.copy()
+
+            for col in required:
+
+                df[col] = pd.to_numeric(
+                    df[col],
+                    errors="coerce"
+                )
+
+            df = df.dropna(
+                subset=required
+            )
+
+            if len(df) < 100:
+
+                continue
+
+            df = df.reset_index(
+                drop=True
+            )
+
+            if len(df) > BARS:
+
+                df = df.iloc[
+                    -BARS:
+                ].reset_index(
+                    drop=True
+                )
+
+            return df, filename
+
+        except (
+            FileNotFoundError,
+            pd.errors.EmptyDataError,
+            pd.errors.ParserError,
+        ):
+
+            continue
+
+    return (
+        pd.DataFrame(),
+        None
     )
-
-    close = (
-        1.1000
-        * np.exp(
-            np.cumsum(returns)
-        )
-    )
-
-    open_price = np.roll(
-        close,
-        1
-    )
-
-    open_price[0] = close[0]
-
-    high = (
-        np.maximum(
-            open_price,
-            close
-        )
-        + 0.0005
-    )
-
-    low = (
-        np.minimum(
-            open_price,
-            close
-        )
-        - 0.0005
-    )
-
-    df = pd.DataFrame(
-        {
-            "open": open_price,
-            "high": high,
-            "low": low,
-            "close": close,
-            "tick_volume": np.full(
-                bars,
-                1000
-            ),
-            "spread": np.zeros(
-                bars
-            ),
-            "real_volume": np.zeros(
-                bars
-            ),
-        }
-    )
-
-    return df
 
 
 # ============================================================
@@ -106,7 +129,7 @@ def main():
     )
 
     print(
-        "BACKTEST ENGINE V3"
+        "REAL-DATA BACKTEST ENGINE"
     )
 
     print("=" * 60)
@@ -114,9 +137,6 @@ def main():
     print(
         f"Symbol          : {SYMBOL}"
     )
-
-    # M15 tetap menjadi BASE DATA.
-    # MTF engine berjalan H1 -> M15 -> M1.
 
     print(
         f"Base Timeframe  : {TIMEFRAME}"
@@ -138,27 +158,116 @@ def main():
         "M1               : ENTRY TRIGGER"
     )
 
+    print()
+
+    # --------------------------------------------------------
+    # LOAD REAL DATA
+    # --------------------------------------------------------
+
+    df, source = load_backtest_data()
+
+    if source is None:
+
+        print(
+            "❌ BACKTEST STOPPED"
+        )
+
+        print("-" * 60)
+
+        print(
+            "No real market data file found."
+        )
+
+        print()
+
+        print(
+            "Expected one of:"
+        )
+
+        print(
+            "  data.csv"
+        )
+
+        print(
+            "  backtest_data.csv"
+        )
+
+        print()
+
+        print(
+            "Required columns:"
+        )
+
+        print(
+            "  open, high, low, close"
+        )
+
+        print()
+
+        print(
+            "Synthetic/random data has been"
+        )
+
+        print(
+            "DISABLED intentionally."
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # DATA VALIDATION
+    # --------------------------------------------------------
+
     print(
-        "M1 Data          : SYNTHETIC PROXY"
+        f"Data Source      : {source}"
     )
 
     print(
-        f"Bars             : {BARS} M15"
+        f"Bars Loaded       : {len(df)}"
+    )
+
+    print(
+        f"Timeframe         : {TIMEFRAME}"
     )
 
     print()
 
-    # --------------------------------------------------------
-    # LOAD BACKTEST DATA
-    # --------------------------------------------------------
-
-    df = create_backtest_data(
-        bars=BARS
+    print(
+        "OHLC VALIDATION"
     )
+
+    print("-" * 60)
+
+    invalid = (
+        (df["high"] < df["low"])
+        |
+        (df["high"] < df["open"])
+        |
+        (df["high"] < df["close"])
+        |
+        (df["low"] > df["open"])
+        |
+        (df["low"] > df["close"])
+    )
+
+    invalid_count = int(
+        invalid.sum()
+    )
+
+    if invalid_count > 0:
+
+        print(
+            f"❌ Invalid OHLC rows: "
+            f"{invalid_count}"
+        )
+
+        return
 
     print(
-        f"Generated base bars: {len(df)} M15"
+        "✅ OHLC structure valid"
     )
+
+    print()
 
     # --------------------------------------------------------
     # RUN BACKTEST
@@ -182,118 +291,42 @@ def main():
             REWARD_RISK
         ),
 
-        min_score=MIN_SCORE
+        min_score=MIN_SCORE,
 
     )
 
     # --------------------------------------------------------
-    # BACKTEST VALIDATION
+    # VALIDATION
     # --------------------------------------------------------
-
-    if result["total_trades"] == 0:
-
-        print()
-
-        print(
-            "⚠️ BACKTEST VALIDATION"
-        )
-
-        print("-" * 60)
-
-        print(
-            "No valid trades were generated."
-        )
-
-        print(
-            "Do NOT optimize the strategy yet."
-        )
-
-        print(
-            "Reason: the current backtest "
-            "filter may be too restrictive."
-        )
-
-    else:
-
-        print()
-
-        print(
-            "✅ BACKTEST VALIDATION"
-        )
-
-        print("-" * 60)
-
-        print(
-            f"Trades       : "
-            f"{result['total_trades']}"
-        )
-
-        print(
-            f"Win Rate     : "
-            f"{result['win_rate']}%"
-        )
-
-        print(
-            f"Profit Factor: "
-            f"{result['profit_factor']}"
-        )
-
-        print(
-            f"Net R        : "
-            f"{result['net_r']}"
-        )
-
-        print(
-            f"Expectancy R : "
-            f"{result['expectancy_r']}"
-        )
-
-    # --------------------------------------------------------
-    # SUMMARY
-    # --------------------------------------------------------
-
-    print()
-
-    print("-" * 60)
 
     print(
-        "BACKTEST SUMMARY"
+        "BACKTEST VALIDATION"
     )
 
     print("-" * 60)
 
     print(
-        f"Total Trades   : "
+        f"Trades       : "
         f"{result['total_trades']}"
     )
 
     print(
-        f"Wins           : "
-        f"{result['wins']}"
-    )
-
-    print(
-        f"Losses         : "
-        f"{result['losses']}"
-    )
-
-    print(
-        f"Win Rate       : "
+        f"Win Rate     : "
         f"{result['win_rate']}%"
     )
 
     print(
-        f"Profit Factor  : "
+        f"Profit Factor: "
         f"{result['profit_factor']}"
     )
 
     print(
-        f"Net R          : "
+        f"Net R        : "
         f"{result['net_r']}"
     )
 
     print(
-        f"Expectancy R   : "
+        f"Expectancy R : "
         f"{result['expectancy_r']}"
     )
 
@@ -321,8 +354,10 @@ def main():
 
         print(
             f"{grade:>2} | "
-            f"Trades: {data['trades']:>4} | "
-            f"Wins: {data['wins']:>4} | "
+            f"Trades: "
+            f"{data['trades']:>4} | "
+            f"Wins: "
+            f"{data['wins']:>4} | "
             f"Win Rate: "
             f"{data['win_rate']:>6.2f}%"
         )
@@ -349,8 +384,10 @@ def main():
 
         print(
             f"{signal:>4} | "
-            f"Trades: {data['trades']:>4} | "
-            f"Wins: {data['wins']:>4} | "
+            f"Trades: "
+            f"{data['trades']:>4} | "
+            f"Wins: "
+            f"{data['wins']:>4} | "
             f"Win Rate: "
             f"{data['win_rate']:>6.2f}%"
         )
