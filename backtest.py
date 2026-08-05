@@ -751,6 +751,37 @@ def backtest_strategy(
 
                 "r_multiple":
                     r_multiple,
+                    
+                # --------------------------------------------
+                # INDICATOR DIAGNOSTIC
+                # --------------------------------------------
+
+                "rsi":
+                    result.get(
+                        "rsi"
+                    ),
+
+                "adx":
+                    result.get(
+                        "adx"
+                    ),
+
+                "momentum":
+                    result.get(
+                        "momentum"
+                    ),
+
+                "atr":
+                    atr,
+
+                "atr_average":
+                    result.get(
+                        "atr_average"
+                    ),
+
+                # --------------------------------------------
+                # PRECISION
+                # --------------------------------------------
 
                 "precision_score":
                     precision_score,
