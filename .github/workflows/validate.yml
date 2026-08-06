@@ -252,6 +252,11 @@ jobs:
         run: |
           python sell_pipeline_diagnostic.py
 
+      - name: Verify SELL diagnostic file
+        run: |
+          python -m py_compile sell_pipeline_diagnostic.py
+          echo "SELL diagnostic syntax: PASS"
+
       # ======================================================
       # REAL-DATA BACKTEST
       # ======================================================
