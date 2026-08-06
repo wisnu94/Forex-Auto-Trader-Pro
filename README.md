@@ -102,3 +102,5 @@ Stable automated trading release
 This software is experimental and does not guarantee profits.
 
 Automated trading involves substantial financial risk.
+
+Validation pipeline active.
