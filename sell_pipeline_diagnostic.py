@@ -25,13 +25,14 @@ from backtest import _build_mtf_confirmation
 
 
 BARS = 3000
+MAX_NEAR_MISSES = 20
 
 
 def main():
 
-    print("=" * 70)
-    print("FOREX AUTO TRADER PRO - SELL PIPELINE DIAGNOSTIC V4.1")
-    print("=" * 70)
+    print("=" * 78)
+    print("FOREX AUTO TRADER PRO - SELL PIPELINE DIAGNOSTIC V5")
+    print("=" * 78)
 
     print(f"Symbol    : {SYMBOL}")
     print(f"Timeframe : {TIMEFRAME}")
@@ -70,7 +71,21 @@ def main():
     }
 
     failures = {}
-    scores = []
+
+    near_misses = []
+
+    def add_failure(name):
+        failures[name] = failures.get(name, 0) + 1
+
+    def add_near_miss(row):
+        near_misses.append(row)
+
+        near_misses.sort(
+            key=lambda x: x["failed_filters"]
+        )
+
+        if len(near_misses) > MAX_NEAR_MISSES:
+            near_misses.pop()
 
     for i in range(70, len(df) - 1):
 
@@ -96,6 +111,11 @@ def main():
 
         atr = float(atr)
         atravg = float(atravg)
+
+        if atravg == 0:
+            continue
+
+        atr_ratio = atr / atravg
 
         rsi = float(
             calculate_rsi(h["close"], 14).iloc[-1]
@@ -138,138 +158,174 @@ def main():
 
         trends = mtf.get("trends", {})
 
-        if not (
+        mtf_ok = (
             trends.get("H1") == "SELL"
             and trends.get("M15") == "SELL"
-        ):
-
-            failures["H1/M15 permission"] = (
-                failures.get("H1/M15 permission", 0) + 1
-            )
-
-            continue
-
-        counters["mtf"] += 1
+        )
 
         # --------------------------------------------------
         # 3. RSI
         # --------------------------------------------------
 
-        if not rsi_confirmation("SELL", rsi):
-
-            failures["RSI"] = failures.get("RSI", 0) + 1
-
-            continue
-
-        counters["rsi"] += 1
+        rsi_ok = rsi_confirmation(
+            "SELL",
+            rsi,
+        )
 
         # --------------------------------------------------
         # 4. ADX
         # --------------------------------------------------
 
-        if not adx_confirmation("SELL", adx):
-
-            failures["ADX"] = failures.get("ADX", 0) + 1
-
-            continue
-
-        counters["adx"] += 1
+        adx_ok = adx_confirmation(
+            "SELL",
+            adx,
+        )
 
         # --------------------------------------------------
         # 5. VOLATILITY
         # --------------------------------------------------
 
-        if not volatility_confirmation(
+        vol_ok = volatility_confirmation(
             atr,
             atravg,
-        ):
-
-            failures["Volatility"] = (
-                failures.get("Volatility", 0) + 1
-            )
-
-            continue
-
-        counters["vol"] += 1
+        )
 
         # --------------------------------------------------
         # 6. EMA DISTANCE
         # --------------------------------------------------
 
-        if not ema_distance_confirmation(
+        ema_ok = ema_distance_confirmation(
             "SELL",
             close,
             ef,
             atr,
-        ):
-
-            failures["EMA distance"] = (
-                failures.get("EMA distance", 0) + 1
-            )
-
-            continue
-
-        counters["ema"] += 1
+        )
 
         # --------------------------------------------------
         # 7. CANDLE
         # --------------------------------------------------
 
-        candle = candle_confirmation(
+        candle_ok = candle_confirmation(
             h,
             "SELL",
         )
 
-        if not candle:
+        # --------------------------------------------------
+        # Record all failed filters
+        # --------------------------------------------------
 
-            failures["Candle confirmation"] = (
-                failures.get("Candle confirmation", 0) + 1
-            )
+        failed = []
 
+        if not mtf_ok:
+            failed.append("MTF")
+
+        if not rsi_ok:
+            failed.append("RSI")
+
+        if not adx_ok:
+            failed.append("ADX")
+
+        if not vol_ok:
+            failed.append("VOL")
+
+        if not ema_ok:
+            failed.append("EMA")
+
+        if not candle_ok:
+            failed.append("CANDLE")
+
+        # --------------------------------------------------
+        # Pipeline counters
+        # --------------------------------------------------
+
+        if not mtf_ok:
+            add_failure("H1/M15 permission")
+            continue
+
+        counters["mtf"] += 1
+
+        if not rsi_ok:
+            add_failure("RSI")
+            continue
+
+        counters["rsi"] += 1
+
+        if not adx_ok:
+            add_failure("ADX")
+            continue
+
+        counters["adx"] += 1
+
+        if not vol_ok:
+            add_failure("Volatility")
+            continue
+
+        counters["vol"] += 1
+
+        if not ema_ok:
+            add_failure("EMA distance")
+            continue
+
+        counters["ema"] += 1
+
+        if not candle_ok:
+            add_failure("Candle confirmation")
             continue
 
         counters["candle"] += 1
 
         # --------------------------------------------------
-        # 8. QUALITY
+        # SELL QUALITY
         # --------------------------------------------------
 
-        if not sell_quality_gate(
+        quality_ok = sell_quality_gate(
             mom,
             adx,
             rsi,
-            candle,
-        ):
+            candle_ok,
+        )
 
-            reasons = []
+        quality_reasons = []
 
-            if mom > -0.08:
-                reasons.append("momentum>-0.08")
+        if mom > -0.08:
+            quality_reasons.append("MOMENTUM")
 
-            if adx < 22:
-                reasons.append("ADX<22")
+        if adx < 22:
+            quality_reasons.append("ADX")
 
-            if rsi < 34:
-                reasons.append("RSI<34")
+        if rsi < 34:
+            quality_reasons.append("RSI")
 
-            if not reasons:
-                reasons.append("unknown")
+        if not quality_ok:
 
-            key = (
+            if not quality_reasons:
+                quality_reasons.append("UNKNOWN")
+
+            reason = (
                 "SELL quality: "
-                + ",".join(reasons)
+                + ",".join(quality_reasons)
             )
 
-            failures[key] = (
-                failures.get(key, 0) + 1
-            )
+            add_failure(reason)
+
+            add_near_miss({
+                "index": i,
+                "close": close,
+                "momentum": mom,
+                "adx": adx,
+                "rsi": rsi,
+                "atr_ratio": atr_ratio,
+                "ema_atr": abs(close - ef) / atr if atr > 0 else 0,
+                "failed_filters": len(quality_reasons),
+                "reason": ",".join(quality_reasons),
+            })
 
             continue
 
         counters["quality"] += 1
 
         # --------------------------------------------------
-        # 9. PRECISION SCORE
+        # PRECISION SCORE
         # --------------------------------------------------
 
         score = calculate_precision_score(
@@ -284,11 +340,9 @@ def main():
             rsi,
             adx,
             atravg,
-            candle,
+            candle_ok,
             mtf,
         )
-
-        scores.append(score)
 
         if score >= 70:
             counters["score70"] += 1
@@ -296,14 +350,26 @@ def main():
         if score >= 80:
             counters["score80"] += 1
 
+        add_near_miss({
+            "index": i,
+            "close": close,
+            "momentum": mom,
+            "adx": adx,
+            "rsi": rsi,
+            "atr_ratio": atr_ratio,
+            "ema_atr": abs(close - ef) / atr if atr > 0 else 0,
+            "failed_filters": 0,
+            "reason": f"QUALITY PASS / SCORE {score}",
+        })
+
     # ======================================================
-    # RESULT
+    # PIPELINE RESULT
     # ======================================================
 
     print()
-    print("-" * 70)
+    print("-" * 78)
     print("SELL PIPELINE")
-    print("-" * 70)
+    print("-" * 78)
 
     labels = [
         ("Raw bearish candidate", "candidate"),
@@ -320,14 +386,18 @@ def main():
 
     for label, key in labels:
         print(
-            f"{label:<30}: "
+            f"{label:<32}: "
             f"{counters[key]:>5}"
         )
 
+    # ======================================================
+    # BOTTLENECKS
+    # ======================================================
+
     print()
-    print("-" * 70)
+    print("-" * 78)
     print("MAIN BOTTLENECKS")
-    print("-" * 70)
+    print("-" * 78)
 
     if failures:
 
@@ -335,46 +405,103 @@ def main():
             failures.items(),
             key=lambda x: x[1],
             reverse=True,
-        )[:10]:
+        )[:15]:
 
             print(
-                f"{reason:<45}: "
+                f"{reason:<48}: "
                 f"{count}"
             )
 
     else:
         print("Tidak ada failure tercatat.")
 
+    # ======================================================
+    # NEAR MISS ANALYSIS
+    # ======================================================
+
     print()
+    print("-" * 78)
+    print("SELL NEAR-MISS ANALYSIS")
+    print("-" * 78)
 
-    if scores:
+    if near_misses:
 
         print(
-            f"Post-quality SELL count : "
-            f"{len(scores)}"
+            "Menampilkan kandidat SELL paling dekat "
+            "dengan lolos quality gate:"
         )
+        print()
+
+        for n, x in enumerate(
+            near_misses[:MAX_NEAR_MISSES],
+            start=1,
+        ):
+
+            print(
+                f"#{n:02d} "
+                f"bar={x['index']} "
+                f"close={x['close']:.5f}"
+            )
+
+            print(
+                f"    Momentum : {x['momentum']:.5f}"
+            )
+
+            print(
+                f"    ADX      : {x['adx']:.2f}"
+            )
+
+            print(
+                f"    RSI      : {x['rsi']:.2f}"
+            )
+
+            print(
+                f"    ATR ratio: {x['atr_ratio']:.3f}"
+            )
+
+            print(
+                f"    EMA/ATR  : {x['ema_atr']:.3f}"
+            )
+
+            print(
+                f"    FAIL     : {x['reason']}"
+            )
+
+            print()
+
+    else:
+        print("Tidak ada near-miss.")
+
+    # ======================================================
+    # FINAL
+    # ======================================================
+
+    print("-" * 78)
+
+    if counters["score80"] > 0:
 
         print(
-            f"Min / Max score         : "
-            f"{min(scores)} / {max(scores)}"
-        )
-
-        print(
-            f"Average score           : "
-            f"{np.mean(scores):.2f}"
+            f"FINAL SELL SIGNALS : "
+            f"{counters['score80']}"
         )
 
     else:
 
         print(
-            "Tidak ada SELL yang lolos "
-            "sampai tahap score."
+            "FINAL SELL SIGNALS : 0"
         )
 
     print()
-    print("=" * 70)
-    print("SELL DIAGNOSTIC COMPLETE")
-    print("=" * 70)
+
+    print(
+        "CATATAN: Diagnostic V5 tidak mengubah "
+        "strategy.py atau threshold trading."
+    )
+
+    print()
+    print("=" * 78)
+    print("SELL DIAGNOSTIC V5 COMPLETE")
+    print("=" * 78)
 
 
 if __name__ == "__main__":
