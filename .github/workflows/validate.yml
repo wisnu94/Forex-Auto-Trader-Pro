@@ -256,6 +256,9 @@ jobs:
         run: |
           python -m py_compile sell_pipeline_diagnostic.py
           echo "SELL diagnostic syntax: PASS"
+      - name: Run SELL quality calibration
+        run: |
+          python sell_quality_calibration.py
 
       # ======================================================
       # REAL-DATA BACKTEST
