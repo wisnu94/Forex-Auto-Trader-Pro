@@ -1,17 +1,16 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 # ============================================================
 # FOREX AUTO TRADER PRO
-# STRATEGY ENGINE V5.1
+# STRATEGY ENGINE V6
 #
-# IMPORTANT:
-# - This file is a normal Python module.
-# - It MUST NOT write files during import.
-# - H1 + M15 are the required MTF permission.
-# - M1 is supplementary and is handled by backtest.py.
-# - SELL quality is stricter because the last real-data test
-#   produced 7 SELL / 0 WIN.
+# Design:
+# - No look-ahead.
+# - H1 + M15 remain the required MTF permission when supplied.
+# - M1 is supplementary and is NOT used as a hard blocker.
+# - SELL is symmetric with BUY; no arbitrary "SELL is bad" bias.
+# - Precision score is diagnostic. It does not manufacture trades.
 # ============================================================
 
 
@@ -20,130 +19,92 @@ def calculate_ema(series, period):
 
 
 def calculate_atr(df, period=14):
-    high_low = df["high"] - df["low"]
-    high_close = (df["high"] - df["close"].shift(1)).abs()
-    low_close = (df["low"] - df["close"].shift(1)).abs()
+    high = df["high"].astype(float)
+    low = df["low"].astype(float)
+    close = df["close"].astype(float)
+    prev_close = close.shift(1)
 
-    true_range = pd.concat(
-        [high_low, high_close, low_close],
+    tr = pd.concat(
+        [
+            high - low,
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ],
         axis=1,
     ).max(axis=1)
 
-    return true_range.rolling(period).mean()
+    return tr.ewm(alpha=1 / period, adjust=False).mean()
 
 
 def calculate_rsi(series, period=14):
-    delta = series.diff()
-
+    delta = series.astype(float).diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
 
-    avg_gain = gain.ewm(
-        alpha=1 / period,
-        adjust=False,
-    ).mean()
-
-    avg_loss = loss.ewm(
-        alpha=1 / period,
-        adjust=False,
-    ).mean()
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
 
     rs = avg_gain / avg_loss.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
-
-    return rsi.fillna(50)
+    return (100 - 100 / (1 + rs)).fillna(50.0)
 
 
 def calculate_adx(df, period=14):
-    high = df["high"]
-    low = df["low"]
-    close = df["close"]
+    high = df["high"].astype(float)
+    low = df["low"].astype(float)
+    close = df["close"].astype(float)
 
-    up_move = high.diff()
-    down_move = -low.diff()
+    up = high.diff()
+    down = -low.diff()
 
     plus_dm = pd.Series(
-        np.where(
-            (up_move > down_move) & (up_move > 0),
-            up_move,
-            0.0,
-        ),
+        np.where((up > down) & (up > 0), up, 0.0),
         index=df.index,
     )
-
     minus_dm = pd.Series(
-        np.where(
-            (down_move > up_move) & (down_move > 0),
-            down_move,
-            0.0,
-        ),
+        np.where((down > up) & (down > 0), down, 0.0),
         index=df.index,
     )
 
-    tr1 = high - low
-    tr2 = (high - close.shift(1)).abs()
-    tr3 = (low - close.shift(1)).abs()
-
-    true_range = pd.concat(
-        [tr1, tr2, tr3],
+    tr = pd.concat(
+        [
+            high - low,
+            (high - close.shift(1)).abs(),
+            (low - close.shift(1)).abs(),
+        ],
         axis=1,
     ).max(axis=1)
 
-    atr = true_range.ewm(
-        alpha=1 / period,
-        adjust=False,
-    ).mean()
+    atr = tr.ewm(alpha=1 / period, adjust=False).mean()
 
     plus_di = (
         100
-        * plus_dm.ewm(
-            alpha=1 / period,
-            adjust=False,
-        ).mean()
+        * plus_dm.ewm(alpha=1 / period, adjust=False).mean()
         / atr.replace(0, np.nan)
     )
-
     minus_di = (
         100
-        * minus_dm.ewm(
-            alpha=1 / period,
-            adjust=False,
-        ).mean()
+        * minus_dm.ewm(alpha=1 / period, adjust=False).mean()
         / atr.replace(0, np.nan)
     )
 
-    denominator = (
-        plus_di + minus_di
-    ).replace(0, np.nan)
+    denom = (plus_di + minus_di).replace(0, np.nan)
+    dx = 100 * (plus_di - minus_di).abs() / denom
 
-    dx = (
-        100
-        * (plus_di - minus_di).abs()
-        / denominator
-    )
-
-    adx = dx.ewm(
-        alpha=1 / period,
-        adjust=False,
-    ).mean()
-
-    return adx.fillna(0)
+    return dx.ewm(alpha=1 / period, adjust=False).mean().fillna(0.0)
 
 
-def detect_structure(df):
-    if len(df) < 10:
+def detect_structure(df, lookback=5):
+    if len(df) < lookback + 2:
         return "UNKNOWN"
 
-    recent_high = df["high"].iloc[-5:-1].max()
-    recent_low = df["low"].iloc[-5:-1].min()
-    last_close = float(df["close"].iloc[-1])
+    prior = df.iloc[-lookback-1:-1]
+    last = df.iloc[-1]
+    close = float(last["close"])
 
-    if last_close > recent_high:
+    if close > float(prior["high"].max()):
         return "BULLISH_BREAK"
-
-    if last_close < recent_low:
+    if close < float(prior["low"].min()):
         return "BEARISH_BREAK"
-
     return "RANGE"
 
 
@@ -151,85 +112,46 @@ def detect_trend(df, fast=20, slow=50):
     if len(df) < slow:
         return "NEUTRAL"
 
-    fast_ema = calculate_ema(
-        df["close"],
-        fast,
-    ).iloc[-1]
-
-    slow_ema = calculate_ema(
-        df["close"],
-        slow,
-    ).iloc[-1]
+    fast_ema = calculate_ema(df["close"], fast).iloc[-1]
+    slow_ema = calculate_ema(df["close"], slow).iloc[-1]
 
     if fast_ema > slow_ema:
         return "BULLISH"
-
     if fast_ema < slow_ema:
         return "BEARISH"
-
     return "NEUTRAL"
 
 
-def calculate_momentum(df):
-    if len(df) < 5:
+def calculate_momentum(df, lookback=5):
+    if len(df) < lookback + 1:
         return 0.0
 
-    current = float(df["close"].iloc[-1])
-    previous = float(df["close"].iloc[-5])
-
-    if previous == 0:
+    now = float(df["close"].iloc[-1])
+    old = float(df["close"].iloc[-lookback - 1])
+    if old == 0:
         return 0.0
-
-    return float(
-        ((current - previous) / previous) * 100
-    )
+    return ((now - old) / old) * 100.0
 
 
 def candle_confirmation(df, signal):
     if len(df) < 2:
         return False
 
-    candle = df.iloc[-1]
-
-    open_price = float(candle["open"])
-    high = float(candle["high"])
-    low = float(candle["low"])
-    close = float(candle["close"])
-
-    candle_range = high - low
-
-    if candle_range <= 0:
+    c = df.iloc[-1]
+    o, h, l, close = map(float, (c["open"], c["high"], c["low"], c["close"]))
+    rng = h - l
+    if rng <= 0:
         return False
 
-    body_ratio = (
-        abs(close - open_price)
-        / candle_range
-    )
-
-    if body_ratio < 0.35:
+    body = abs(close - o) / rng
+    if body < 0.30:
         return False
 
     if signal == "BUY":
-        if close <= open_price:
-            return False
-
-        close_position = (
-            (close - low)
-            / candle_range
-        )
-
-        return close_position >= 0.60
+        return close > o and ((close - l) / rng) >= 0.58
 
     if signal == "SELL":
-        if close >= open_price:
-            return False
-
-        close_position = (
-            (high - close)
-            / candle_range
-        )
-
-        return close_position >= 0.60
+        return close < o and ((h - close) / rng) >= 0.58
 
     return False
 
@@ -237,114 +159,58 @@ def candle_confirmation(df, signal):
 def rsi_confirmation(signal, rsi):
     if rsi is None or pd.isna(rsi):
         return False
-
     if signal == "BUY":
-        return 52 <= rsi <= 70
-
+        return 50 <= rsi <= 72
     if signal == "SELL":
-        return 30 <= rsi <= 48
-
+        return 28 <= rsi <= 50
     return False
 
 
 def adx_confirmation(signal, adx):
-    if adx is None or pd.isna(adx):
-        return False
-
-    # Signal-specific quality is handled below.
-    # This base filter keeps the strategy compatible
-    # with the previous V5 architecture.
-    return adx >= 18
+    # ADX measures trend strength, not direction.
+    # Direction is supplied by EMA/structure/MTF.
+    return adx is not None and np.isfinite(adx) and adx >= 18
 
 
 def volatility_confirmation(atr, atr_average):
-    if (
-        atr is None
-        or atr_average is None
-        or pd.isna(atr)
-        or pd.isna(atr_average)
-    ):
+    if atr is None or atr_average is None:
         return False
-
+    if not np.isfinite(atr) or not np.isfinite(atr_average):
+        return False
     if atr <= 0 or atr_average <= 0:
         return False
 
-    if atr < atr_average * 0.70:
-        return False
-
-    if atr > atr_average * 2.50:
-        return False
-
-    return True
+    ratio = atr / atr_average
+    return 0.65 <= ratio <= 2.25
 
 
-def ema_distance_confirmation(
-    signal,
-    close,
-    ema_fast,
-    atr,
-):
-    if (
-        atr is None
-        or pd.isna(atr)
-        or atr <= 0
-    ):
+def ema_distance_confirmation(signal, close, ema_fast, atr):
+    if atr is None or not np.isfinite(atr) or atr <= 0:
         return False
 
     distance = abs(close - ema_fast)
-
-    if distance > atr * 1.50:
+    if distance > atr * 1.75:
         return False
 
     if signal == "BUY":
         return close > ema_fast
-
     if signal == "SELL":
         return close < ema_fast
-
     return False
 
 
-def sell_quality_gate(
-    momentum,
-    adx,
-    rsi,
-    candle_confirmed,
-):
-    """
-    SELL gate based on the real-data diagnostic:
-    previous run = 7 SELL / 0 WIN.
-
-    Weak bearish conditions are rejected instead of
-    forcing more trades.
-    """
-    if momentum is None or pd.isna(momentum):
-        return False
-
-    if adx is None or pd.isna(adx):
-        return False
-
-    if rsi is None or pd.isna(rsi):
-        return False
-
-    # Stronger bearish impulse than the previous
-    # -0.045 .. -0.057 weak SELL cluster.
-    if momentum > -0.08:
-        return False
-
-    # ADX below 22 was mostly associated with weak
-    # SELL attempts in the previous diagnostic.
-    if adx < 22:
-        return False
-
-    # Do not short an already deeply oversold market.
-    if rsi < 34:
-        return False
-
+def sell_quality_gate(momentum, adx, rsi, candle_confirmed):
+    # Symmetric quality gate. The old V5 gate rejected almost every
+    # SELL because it demanded momentum < -0.08 and ADX >= 22.
+    # Those thresholds were not statistically validated.
     if not candle_confirmed:
         return False
+    if momentum is None or adx is None or rsi is None:
+        return False
+    if not np.isfinite(momentum) or not np.isfinite(adx) or not np.isfinite(rsi):
+        return False
 
-    return True
+    return momentum < -0.02 and adx >= 18 and rsi <= 50
 
 
 def precision_entry_filter(
@@ -361,76 +227,42 @@ def precision_entry_filter(
     atr_average,
     candle_confirmed,
 ):
-    if signal == "HOLD":
+    if signal not in ("BUY", "SELL"):
         return False
 
     if signal == "BUY":
-        if trend != "BULLISH":
-            return False
-
-        if ema_fast <= ema_slow:
-            return False
-
-        if structure != "BULLISH_BREAK":
-            return False
-
-        if momentum <= 0:
-            return False
-
-    elif signal == "SELL":
-        if trend != "BEARISH":
-            return False
-
-        if ema_fast >= ema_slow:
-            return False
-
-        if structure != "BEARISH_BREAK":
-            return False
-
-        if momentum >= 0:
-            return False
-
+        directional_ok = (
+            trend == "BULLISH"
+            and ema_fast > ema_slow
+            and momentum > 0
+            and structure in ("BULLISH_BREAK", "RANGE")
+        )
     else:
-        return False
+        directional_ok = (
+            trend == "BEARISH"
+            and ema_fast < ema_slow
+            and momentum < 0
+            and structure in ("BEARISH_BREAK", "RANGE")
+        )
 
-    if (
-        atr_value is None
-        or pd.isna(atr_value)
-        or atr_value <= 0
-    ):
+    if not directional_ok:
         return False
 
     if not rsi_confirmation(signal, rsi):
         return False
-
     if not adx_confirmation(signal, adx):
         return False
-
-    if not volatility_confirmation(
-        atr_value,
-        atr_average,
-    ):
+    if not volatility_confirmation(atr_value, atr_average):
         return False
-
-    if not ema_distance_confirmation(
-        signal,
-        close,
-        ema_fast,
-        atr_value,
-    ):
+    if not ema_distance_confirmation(signal, close, ema_fast, atr_value):
         return False
-
     if not candle_confirmed:
         return False
 
-    if signal == "SELL":
-        if not sell_quality_gate(
-            momentum,
-            adx,
-            rsi,
-            candle_confirmed,
-        ):
-            return False
+    if signal == "SELL" and not sell_quality_gate(
+        momentum, adx, rsi, candle_confirmed
+    ):
+        return False
 
     return True
 
@@ -450,223 +282,113 @@ def calculate_precision_score(
     candle_confirmed,
     mtf_confirmation=None,
 ):
-    if signal == "HOLD":
+    if signal not in ("BUY", "SELL"):
         return 0
 
     score = 0.0
 
-    # --------------------------------------------------------
-    # MTF — 20
-    # --------------------------------------------------------
-    if mtf_confirmation is not None:
-        status = mtf_confirmation.get(
-            "status",
-            "UNKNOWN",
-        )
+    # MTF: 25
+    if mtf_confirmation:
+        trends = mtf_confirmation.get("trends", {})
+        h1 = trends.get("H1", "HOLD")
+        m15 = trends.get("M15", "HOLD")
 
-        if signal == "BUY":
-            if status == "STRONG_BUY":
-                score += 20
-            elif status in (
-                "BUY_BIAS",
-                "BUY_CONFIRMED_H1_M15",
-                "BUY_H1_M15",
-            ):
-                score += 16
+        if signal == "BUY" and h1 == "BUY" and m15 == "BUY":
+            score += 25
+        elif signal == "SELL" and h1 == "SELL" and m15 == "SELL":
+            score += 25
+        elif signal == "BUY" and h1 == "BUY":
+            score += 12
+        elif signal == "SELL" and h1 == "SELL":
+            score += 12
 
-        elif signal == "SELL":
-            if status == "STRONG_SELL":
-                score += 20
-            elif status in (
-                "SELL_BIAS",
-                "SELL_CONFIRMED_H1_M15",
-                "SELL_H1_M15",
-            ):
-                score += 16
-
-    # --------------------------------------------------------
-    # TREND — 15
-    # --------------------------------------------------------
-    if ema_slow > 0:
-        if (
-            signal == "BUY"
-            and trend == "BULLISH"
-        ):
-            spread = (
-                ema_fast - ema_slow
-            ) / ema_slow
-
-            if spread >= 0.003:
-                score += 15
-            elif spread >= 0.0015:
-                score += 12
-            elif spread > 0:
-                score += 9
-
-        elif (
-            signal == "SELL"
-            and trend == "BEARISH"
-        ):
-            spread = (
-                ema_slow - ema_fast
-            ) / ema_slow
-
-            if spread >= 0.003:
-                score += 15
-            elif spread >= 0.0015:
-                score += 12
-            elif spread > 0:
-                score += 9
-
-    # --------------------------------------------------------
-    # STRUCTURE — 15
-    # --------------------------------------------------------
-    if (
-        signal == "BUY"
-        and structure == "BULLISH_BREAK"
-    ):
+    # Trend alignment: 15
+    if signal == "BUY" and trend == "BULLISH":
+        score += 15
+    elif signal == "SELL" and trend == "BEARISH":
         score += 15
 
-    elif (
-        signal == "SELL"
-        and structure == "BEARISH_BREAK"
-    ):
-        score += 15
+    # Structure: 15 for breakout, 8 for orderly range continuation
+    if signal == "BUY":
+        if structure == "BULLISH_BREAK":
+            score += 15
+        elif structure == "RANGE":
+            score += 8
+    else:
+        if structure == "BEARISH_BREAK":
+            score += 15
+        elif structure == "RANGE":
+            score += 8
 
-    # --------------------------------------------------------
-    # RSI — 10
-    # --------------------------------------------------------
-    if rsi is not None and not pd.isna(rsi):
+    # RSI: 10
+    if rsi is not None and np.isfinite(rsi):
         if signal == "BUY":
-            if 55 <= rsi <= 65:
+            if 54 <= rsi <= 66:
                 score += 10
-            elif 52 <= rsi < 55:
-                score += 8
-            elif 65 < rsi <= 70:
-                score += 6
-
-        elif signal == "SELL":
-            if 38 <= rsi <= 45:
+            elif 50 <= rsi <= 72:
+                score += 7
+        else:
+            if 34 <= rsi <= 46:
                 score += 10
-            elif 45 < rsi <= 48:
-                score += 8
-            elif 34 <= rsi < 38:
-                score += 6
+            elif 28 <= rsi <= 50:
+                score += 7
 
-    # --------------------------------------------------------
-    # ADX — 10
-    # --------------------------------------------------------
-    if adx is not None and not pd.isna(adx):
+    # ADX: 10
+    if adx is not None and np.isfinite(adx):
         if adx >= 30:
             score += 10
         elif adx >= 25:
             score += 8
-        elif adx >= 22:
-            score += 6
         elif adx >= 18:
-            score += 4
+            score += 5
 
-    # --------------------------------------------------------
-    # MOMENTUM — 10
-    # --------------------------------------------------------
-    momentum_strength = abs(
-        float(momentum)
-    )
-
-    if signal == "BUY" and momentum > 0:
-        if momentum_strength >= 0.30:
+    # Momentum: 10
+    m = abs(float(momentum))
+    if (signal == "BUY" and momentum > 0) or (signal == "SELL" and momentum < 0):
+        if m >= 0.30:
             score += 10
-        elif momentum_strength >= 0.15:
+        elif m >= 0.15:
             score += 8
-        elif momentum_strength >= 0.05:
+        elif m >= 0.05:
             score += 6
         else:
             score += 3
 
-    elif signal == "SELL" and momentum < 0:
-        if momentum_strength >= 0.30:
-            score += 10
-        elif momentum_strength >= 0.15:
-            score += 8
-        elif momentum_strength >= 0.08:
-            score += 6
-        else:
-            score += 3
-
-    # --------------------------------------------------------
-    # VOLATILITY — 5
-    # --------------------------------------------------------
-    if volatility_confirmation(
-        atr_value,
-        atr_average,
-    ):
+    # Volatility: 5
+    if volatility_confirmation(atr_value, atr_average):
         score += 5
 
-    # --------------------------------------------------------
-    # CANDLE — 5
-    # --------------------------------------------------------
+    # Candle: 5
     if candle_confirmed:
         score += 5
 
-    return int(
-        max(0, min(100, round(score)))
-    )
+    return int(max(0, min(100, round(score))))
 
 
 def precision_grade(score):
     if score >= 90:
         return "A+"
-
     if score >= 80:
         return "A"
-
     if score >= 70:
         return "B"
-
     if score >= 60:
         return "C"
-
     return "D"
 
 
-def _extract_mtf_permission(
-    signal,
-    mtf_confirmation,
-):
-    """
-    H1 + M15 are hard permission.
-    M1 remains supplementary.
-    """
+def _mtf_permission(signal, mtf_confirmation):
     if not mtf_confirmation:
-        return False
+        return True
 
-    trends = mtf_confirmation.get(
-        "trends",
-        {},
-    )
-
-    h1 = trends.get(
-        "H1",
-        "HOLD",
-    )
-
-    m15 = trends.get(
-        "M15",
-        "HOLD",
-    )
+    trends = mtf_confirmation.get("trends", {})
+    h1 = trends.get("H1", "HOLD")
+    m15 = trends.get("M15", "HOLD")
 
     if signal == "BUY":
-        return (
-            h1 == "BUY"
-            and m15 == "BUY"
-        )
-
+        return h1 == "BUY" and m15 == "BUY"
     if signal == "SELL":
-        return (
-            h1 == "SELL"
-            and m15 == "SELL"
-        )
-
+        return h1 == "SELL" and m15 == "SELL"
     return False
 
 
@@ -677,289 +399,142 @@ def generate_signal(
     atr_period=14,
     mtf_confirmation=None,
 ):
-    """
-    Main strategy API consumed by backtest.py.
-
-    Returns all diagnostic fields expected by the
-    existing V5 backtest engine.
-    """
     neutral = {
         "signal": "HOLD",
+        "trend": "NEUTRAL",
+        "structure": "UNKNOWN",
+        "momentum": 0.0,
         "score": 0,
         "precision_score": 0,
         "precision_grade": "D",
         "precision_pass": False,
-        "trend": "NEUTRAL",
-        "structure": "UNKNOWN",
-        "momentum": 0.0,
         "atr": None,
+        "atr_average": None,
         "rsi": 50.0,
         "adx": 0.0,
-        "atr_average": None,
         "ema_fast": None,
         "ema_slow": None,
         "candle_confirmed": False,
-        "mtf_score": 0,
-        "mtf_status": "NEUTRAL",
+        "reason": "insufficient_data",
     }
 
-    if df is None:
+    if df is None or len(df) < max(ema_slow + 10, 80):
         return neutral
 
-    if len(df) < max(
-        ema_slow + 10,
-        atr_period + 10,
-        60,
-    ):
+    data = df.copy().reset_index(drop=True)
+
+    close = data["close"].astype(float)
+    ema_fast_series = calculate_ema(close, ema_fast)
+    ema_slow_series = calculate_ema(close, ema_slow)
+    atr_series = calculate_atr(data, atr_period)
+    rsi_series = calculate_rsi(close, 14)
+    adx_series = calculate_adx(data, 14)
+
+    ema_f = float(ema_fast_series.iloc[-1])
+    ema_s = float(ema_slow_series.iloc[-1])
+    atr = float(atr_series.iloc[-1])
+    atr_avg = float(atr_series.rolling(50).mean().iloc[-1])
+    rsi = float(rsi_series.iloc[-1])
+    adx = float(adx_series.iloc[-1])
+    momentum = float(calculate_momentum(data))
+    structure = detect_structure(data)
+    trend = detect_trend(data, ema_fast, ema_slow)
+
+    if not all(np.isfinite(x) for x in (ema_f, ema_s, atr, atr_avg, rsi, adx, momentum)):
         return neutral
 
-    data = (
-        df.copy()
-        .reset_index(drop=True)
-    )
+    candle_buy = candle_confirmation(data, "BUY")
+    candle_sell = candle_confirmation(data, "SELL")
 
-    required = [
-        "open",
-        "high",
-        "low",
-        "close",
-    ]
-
-    if any(
-        column not in data.columns
-        for column in required
-    ):
-        return neutral
-
-    for column in required:
-        data[column] = pd.to_numeric(
-            data[column],
-            errors="coerce",
-        )
-
-    data = data.dropna(
-        subset=required
-    ).reset_index(drop=True)
-
-    if len(data) < 60:
-        return neutral
-
-    close = float(
-        data["close"].iloc[-1]
-    )
-
-    ema_fast_series = calculate_ema(
-        data["close"],
-        ema_fast,
-    )
-
-    ema_slow_series = calculate_ema(
-        data["close"],
-        ema_slow,
-    )
-
-    ema_fast_value = float(
-        ema_fast_series.iloc[-1]
-    )
-
-    ema_slow_value = float(
-        ema_slow_series.iloc[-1]
-    )
-
-    atr_series = calculate_atr(
-        data,
-        atr_period,
-    )
-
-    atr_value = atr_series.iloc[-1]
-
-    atr_average_series = (
-        atr_series.rolling(20).mean()
-    )
-
-    atr_average = (
-        atr_average_series.iloc[-1]
-    )
-
-    rsi = float(
-        calculate_rsi(
-            data["close"]
-        ).iloc[-1]
-    )
-
-    adx = float(
-        calculate_adx(
-            data,
-            period=14,
-        ).iloc[-1]
-    )
-
-    momentum = calculate_momentum(
-        data
-    )
-
-    trend = detect_trend(
-        data,
-        fast=ema_fast,
-        slow=ema_slow,
-    )
-
-    structure = detect_structure(
-        data
-    )
-
-    # Candidate direction comes from the
-    # current trend + structure + momentum.
-    if (
+    # Candidate direction is deliberately broad. Precision filters decide.
+    buy_candidate = (
         trend == "BULLISH"
-        and structure == "BULLISH_BREAK"
+        and ema_f > ema_s
         and momentum > 0
-    ):
-        signal = "BUY"
-
-    elif (
+        and rsi >= 50
+    )
+    sell_candidate = (
         trend == "BEARISH"
-        and structure == "BEARISH_BREAK"
+        and ema_f < ema_s
         and momentum < 0
-    ):
+        and rsi <= 50
+    )
+
+    if buy_candidate and _mtf_permission("BUY", mtf_confirmation):
+        signal = "BUY"
+        candle_ok = candle_buy
+    elif sell_candidate and _mtf_permission("SELL", mtf_confirmation):
         signal = "SELL"
-
+        candle_ok = candle_sell
     else:
-        signal = "HOLD"
+        return {
+            **neutral,
+            "trend": trend,
+            "structure": structure,
+            "momentum": momentum,
+            "atr": atr,
+            "atr_average": atr_avg,
+            "rsi": rsi,
+            "adx": adx,
+            "ema_fast": ema_f,
+            "ema_slow": ema_s,
+            "reason": "no_directional_candidate",
+        }
 
-    candle_confirmed = (
-        candle_confirmation(
-            data,
-            signal,
-        )
-        if signal != "HOLD"
-        else False
+    precision_score = calculate_precision_score(
+        signal=signal,
+        trend=trend,
+        structure=structure,
+        momentum=momentum,
+        atr_value=atr,
+        close=float(close.iloc[-1]),
+        ema_fast=ema_f,
+        ema_slow=ema_s,
+        rsi=rsi,
+        adx=adx,
+        atr_average=atr_avg,
+        candle_confirmed=candle_ok,
+        mtf_confirmation=mtf_confirmation,
     )
 
-    if (
-        atr_value is None
-        or pd.isna(atr_value)
-    ):
-        atr_float = None
-    else:
-        atr_float = float(atr_value)
-
-    if (
-        atr_average is None
-        or pd.isna(atr_average)
-    ):
-        atr_average_float = None
-    else:
-        atr_average_float = float(
-            atr_average
-        )
-
-    mtf_score = int(
-        mtf_confirmation.get(
-            "score",
-            0,
-        )
-        if mtf_confirmation
-        else 0
+    precision_pass = precision_entry_filter(
+        signal=signal,
+        trend=trend,
+        structure=structure,
+        momentum=momentum,
+        atr_value=atr,
+        close=float(close.iloc[-1]),
+        ema_fast=ema_f,
+        ema_slow=ema_s,
+        rsi=rsi,
+        adx=adx,
+        atr_average=atr_avg,
+        candle_confirmed=candle_ok,
     )
 
-    mtf_status = (
-        mtf_confirmation.get(
-            "status",
-            "NEUTRAL",
-        )
-        if mtf_confirmation
-        else "NEUTRAL"
-    )
-
-    # H1 + M15 are hard permission.
-    mtf_allowed = _extract_mtf_permission(
-        signal,
-        mtf_confirmation,
-    )
-
-    # A real MTF confirmation is required for
-    # both directions in the production backtest.
-    if signal != "HOLD" and not mtf_allowed:
-        precision_score = 0
-        precision_pass = False
-
-    else:
-        filter_pass = precision_entry_filter(
-            signal=signal,
-            trend=trend,
-            structure=structure,
-            momentum=momentum,
-            atr_value=atr_float,
-            close=close,
-            ema_fast=ema_fast_value,
-            ema_slow=ema_slow_value,
-            rsi=rsi,
-            adx=adx,
-            atr_average=atr_average_float,
-            candle_confirmed=candle_confirmed,
-        )
-
-        precision_score = calculate_precision_score(
-            signal=signal,
-            trend=trend,
-            structure=structure,
-            momentum=momentum,
-            atr_value=atr_float,
-            close=close,
-            ema_fast=ema_fast_value,
-            ema_slow=ema_slow_value,
-            rsi=rsi,
-            adx=adx,
-            atr_average=atr_average_float,
-            candle_confirmed=candle_confirmed,
-            mtf_confirmation=mtf_confirmation,
-        )
-
-        # BUY threshold remains 70.
-        # SELL has a higher threshold to prevent
-        # the previous low-quality SELL cluster.
-        required_score = (
-            80
-            if signal == "SELL"
-            else 70
-        )
-
-        precision_pass = (
-            filter_pass
-            and precision_score >= required_score
-        )
-
-    grade = precision_grade(
-        precision_score
-    )
+    # score is retained for compatibility with the existing bot.
+    score = precision_score
 
     return {
-        "signal": signal,
-        "score": precision_score,
-        "precision_score": precision_score,
-        "precision_grade": grade,
-        "precision_pass": precision_pass,
+        "signal": signal if precision_pass else "HOLD",
+        "candidate_signal": signal,
         "trend": trend,
         "structure": structure,
-        "momentum": float(momentum),
-        "atr": atr_float,
-        "rsi": float(rsi),
-        "adx": float(adx),
-        "atr_average": atr_average_float,
-        "ema_fast": ema_fast_value,
-        "ema_slow": ema_slow_value,
-        "candle_confirmed": bool(
-            candle_confirmed
+        "momentum": momentum,
+        "score": score,
+        "precision_score": precision_score,
+        "precision_grade": precision_grade(precision_score),
+        "precision_pass": bool(precision_pass),
+        "atr": atr,
+        "atr_average": atr_avg,
+        "rsi": rsi,
+        "adx": adx,
+        "ema_fast": ema_f,
+        "ema_slow": ema_s,
+        "candle_confirmed": bool(candle_ok),
+        "reason": (
+            "precision_pass"
+            if precision_pass
+            else "precision_filter_rejected"
         ),
-        "mtf_score": mtf_score,
-        "mtf_status": mtf_status,
     }
-
-
-# ============================================================
-# SELF TEST
-# ============================================================
-
-if __name__ == "__main__":
-    print("strategy.py import/test OK")
