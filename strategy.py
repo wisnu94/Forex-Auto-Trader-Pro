@@ -2,37 +2,24 @@ import numpy as np
 import pandas as pd
 
 # ============================================================
-# FOREX AUTO TRADER PRO
-# STRATEGY ENGINE V6
-#
-# Design:
-# - No look-ahead.
-# - H1 + M15 remain the required MTF permission when supplied.
-# - M1 is supplementary and is NOT used as a hard blocker.
-# - SELL is symmetric with BUY; no arbitrary "SELL is bad" bias.
-# - Precision score is diagnostic. It does not manufacture trades.
+# FOREX AUTO TRADER PRO - STRATEGY ENGINE V7
+# Goal: precision-first, direction-aware, no look-ahead.
 # ============================================================
 
-
 def calculate_ema(series, period):
-    return series.ewm(span=period, adjust=False).mean()
+    return series.astype(float).ewm(span=period, adjust=False).mean()
 
 
 def calculate_atr(df, period=14):
     high = df["high"].astype(float)
     low = df["low"].astype(float)
     close = df["close"].astype(float)
-    prev_close = close.shift(1)
-
-    tr = pd.concat(
-        [
-            high - low,
-            (high - prev_close).abs(),
-            (low - prev_close).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
-
+    prev = close.shift(1)
+    tr = pd.concat([
+        high - low,
+        (high - prev).abs(),
+        (low - prev).abs(),
+    ], axis=1).max(axis=1)
     return tr.ewm(alpha=1 / period, adjust=False).mean()
 
 
@@ -40,70 +27,49 @@ def calculate_rsi(series, period=14):
     delta = series.astype(float).diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-
-    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
-
-    rs = avg_gain / avg_loss.replace(0, np.nan)
+    ag = gain.ewm(alpha=1 / period, adjust=False).mean()
+    al = loss.ewm(alpha=1 / period, adjust=False).mean()
+    rs = ag / al.replace(0, np.nan)
     return (100 - 100 / (1 + rs)).fillna(50.0)
 
 
-def calculate_adx(df, period=14):
+def calculate_adx_components(df, period=14):
     high = df["high"].astype(float)
     low = df["low"].astype(float)
     close = df["close"].astype(float)
 
     up = high.diff()
     down = -low.diff()
+    plus_dm = pd.Series(np.where((up > down) & (up > 0), up, 0.0), index=df.index)
+    minus_dm = pd.Series(np.where((down > up) & (down > 0), down, 0.0), index=df.index)
 
-    plus_dm = pd.Series(
-        np.where((up > down) & (up > 0), up, 0.0),
-        index=df.index,
-    )
-    minus_dm = pd.Series(
-        np.where((down > up) & (down > 0), down, 0.0),
-        index=df.index,
-    )
-
-    tr = pd.concat(
-        [
-            high - low,
-            (high - close.shift(1)).abs(),
-            (low - close.shift(1)).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
+    tr = pd.concat([
+        high - low,
+        (high - close.shift(1)).abs(),
+        (low - close.shift(1)).abs(),
+    ], axis=1).max(axis=1)
 
     atr = tr.ewm(alpha=1 / period, adjust=False).mean()
-
-    plus_di = (
-        100
-        * plus_dm.ewm(alpha=1 / period, adjust=False).mean()
-        / atr.replace(0, np.nan)
-    )
-    minus_di = (
-        100
-        * minus_dm.ewm(alpha=1 / period, adjust=False).mean()
-        / atr.replace(0, np.nan)
-    )
-
-    denom = (plus_di + minus_di).replace(0, np.nan)
-    dx = 100 * (plus_di - minus_di).abs() / denom
-
-    return dx.ewm(alpha=1 / period, adjust=False).mean().fillna(0.0)
+    pdi = 100 * plus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr.replace(0, np.nan)
+    mdi = 100 * minus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr.replace(0, np.nan)
+    denom = (pdi + mdi).replace(0, np.nan)
+    dx = 100 * (pdi - mdi).abs() / denom
+    adx = dx.ewm(alpha=1 / period, adjust=False).mean().fillna(0.0)
+    return adx, pdi.fillna(0.0), mdi.fillna(0.0)
 
 
-def detect_structure(df, lookback=5):
+def calculate_adx(df, period=14):
+    return calculate_adx_components(df, period)[0]
+
+
+def detect_structure(df, lookback=8):
     if len(df) < lookback + 2:
         return "UNKNOWN"
-
     prior = df.iloc[-lookback-1:-1]
-    last = df.iloc[-1]
-    close = float(last["close"])
-
-    if close > float(prior["high"].max()):
+    last = float(df["close"].iloc[-1])
+    if last > float(prior["high"].max()):
         return "BULLISH_BREAK"
-    if close < float(prior["low"].min()):
+    if last < float(prior["low"].min()):
         return "BEARISH_BREAK"
     return "RANGE"
 
@@ -111,13 +77,11 @@ def detect_structure(df, lookback=5):
 def detect_trend(df, fast=20, slow=50):
     if len(df) < slow:
         return "NEUTRAL"
-
-    fast_ema = calculate_ema(df["close"], fast).iloc[-1]
-    slow_ema = calculate_ema(df["close"], slow).iloc[-1]
-
-    if fast_ema > slow_ema:
+    ef = calculate_ema(df["close"], fast).iloc[-1]
+    es = calculate_ema(df["close"], slow).iloc[-1]
+    if ef > es:
         return "BULLISH"
-    if fast_ema < slow_ema:
+    if ef < es:
         return "BEARISH"
     return "NEUTRAL"
 
@@ -125,242 +89,138 @@ def detect_trend(df, fast=20, slow=50):
 def calculate_momentum(df, lookback=5):
     if len(df) < lookback + 1:
         return 0.0
-
+    old = float(df["close"].iloc[-lookback-1])
     now = float(df["close"].iloc[-1])
-    old = float(df["close"].iloc[-lookback - 1])
-    if old == 0:
-        return 0.0
-    return ((now - old) / old) * 100.0
+    return 0.0 if old == 0 else ((now - old) / old) * 100.0
 
 
 def candle_confirmation(df, signal):
     if len(df) < 2:
         return False
-
     c = df.iloc[-1]
-    o, h, l, close = map(float, (c["open"], c["high"], c["low"], c["close"]))
+    o, h, l, close = [float(c[x]) for x in ("open", "high", "low", "close")]
     rng = h - l
     if rng <= 0:
         return False
-
     body = abs(close - o) / rng
-    if body < 0.30:
+    if body < 0.35:
         return False
-
     if signal == "BUY":
-        return close > o and ((close - l) / rng) >= 0.58
-
+        return close > o and (close - l) / rng >= 0.60
     if signal == "SELL":
-        return close < o and ((h - close) / rng) >= 0.58
-
+        return close < o and (h - close) / rng >= 0.60
     return False
 
 
-def rsi_confirmation(signal, rsi):
-    if rsi is None or pd.isna(rsi):
+def _mtf_permission(signal, mtf_confirmation):
+    if not mtf_confirmation:
+        return True
+    trends = mtf_confirmation.get("trends", {})
+    h1 = trends.get("H1", "HOLD")
+    m15 = trends.get("M15", "HOLD")
+    return (h1 == "BUY" and m15 == "BUY") if signal == "BUY" else (
+        h1 == "SELL" and m15 == "SELL"
+    )
+
+
+def _direction_ok(signal, pdi, mdi, adx):
+    if adx < 18:
         return False
     if signal == "BUY":
-        return 50 <= rsi <= 72
-    if signal == "SELL":
-        return 28 <= rsi <= 50
-    return False
+        return pdi > mdi and (pdi - mdi) >= 2.0
+    return mdi > pdi and (mdi - pdi) >= 2.0
 
 
-def adx_confirmation(signal, adx):
-    # ADX measures trend strength, not direction.
-    # Direction is supplied by EMA/structure/MTF.
-    return adx is not None and np.isfinite(adx) and adx >= 18
-
-
-def volatility_confirmation(atr, atr_average):
-    if atr is None or atr_average is None:
+def _trend_slope_ok(signal, ema_fast_series):
+    if len(ema_fast_series) < 6:
         return False
-    if not np.isfinite(atr) or not np.isfinite(atr_average):
-        return False
-    if atr <= 0 or atr_average <= 0:
-        return False
+    now = float(ema_fast_series.iloc[-1])
+    old = float(ema_fast_series.iloc[-6])
+    if signal == "BUY":
+        return now > old
+    return now < old
 
+
+def _volatility_ok(atr, atr_average):
+    if not np.isfinite(atr) or not np.isfinite(atr_average) or atr <= 0 or atr_average <= 0:
+        return False
     ratio = atr / atr_average
-    return 0.65 <= ratio <= 2.25
+    return 0.70 <= ratio <= 1.90
 
 
-def ema_distance_confirmation(signal, close, ema_fast, atr):
-    if atr is None or not np.isfinite(atr) or atr <= 0:
+def _ema_distance_ok(signal, close, ema_fast, atr):
+    if atr <= 0:
         return False
-
-    distance = abs(close - ema_fast)
-    if distance > atr * 1.75:
+    distance = abs(close - ema_fast) / atr
+    if distance > 1.35:
         return False
+    return close > ema_fast if signal == "BUY" else close < ema_fast
 
+
+def _rsi_ok(signal, rsi):
+    # Avoid chasing exhausted moves.
     if signal == "BUY":
-        return close > ema_fast
-    if signal == "SELL":
-        return close < ema_fast
-    return False
-
-
-def sell_quality_gate(momentum, adx, rsi, candle_confirmed):
-    # Symmetric quality gate. The old V5 gate rejected almost every
-    # SELL because it demanded momentum < -0.08 and ADX >= 22.
-    # Those thresholds were not statistically validated.
-    if not candle_confirmed:
-        return False
-    if momentum is None or adx is None or rsi is None:
-        return False
-    if not np.isfinite(momentum) or not np.isfinite(adx) or not np.isfinite(rsi):
-        return False
-
-    return momentum < -0.02 and adx >= 18 and rsi <= 50
-
-
-def precision_entry_filter(
-    signal,
-    trend,
-    structure,
-    momentum,
-    atr_value,
-    close,
-    ema_fast,
-    ema_slow,
-    rsi,
-    adx,
-    atr_average,
-    candle_confirmed,
-):
-    if signal not in ("BUY", "SELL"):
-        return False
-
-    if signal == "BUY":
-        directional_ok = (
-            trend == "BULLISH"
-            and ema_fast > ema_slow
-            and momentum > 0
-            and structure in ("BULLISH_BREAK", "RANGE")
-        )
-    else:
-        directional_ok = (
-            trend == "BEARISH"
-            and ema_fast < ema_slow
-            and momentum < 0
-            and structure in ("BEARISH_BREAK", "RANGE")
-        )
-
-    if not directional_ok:
-        return False
-
-    if not rsi_confirmation(signal, rsi):
-        return False
-    if not adx_confirmation(signal, adx):
-        return False
-    if not volatility_confirmation(atr_value, atr_average):
-        return False
-    if not ema_distance_confirmation(signal, close, ema_fast, atr_value):
-        return False
-    if not candle_confirmed:
-        return False
-
-    if signal == "SELL" and not sell_quality_gate(
-        momentum, adx, rsi, candle_confirmed
-    ):
-        return False
-
-    return True
+        return 48 <= rsi <= 68
+    return 32 <= rsi <= 52
 
 
 def calculate_precision_score(
-    signal,
-    trend,
-    structure,
-    momentum,
-    atr_value,
-    close,
-    ema_fast,
-    ema_slow,
-    rsi,
-    adx,
-    atr_average,
-    candle_confirmed,
-    mtf_confirmation=None,
+    signal, trend, structure, momentum, atr_value, close,
+    ema_fast, ema_slow, rsi, adx, atr_average,
+    candle_confirmed, mtf_confirmation=None, plus_di=None, minus_di=None,
+    trend_slope_ok=False
 ):
     if signal not in ("BUY", "SELL"):
         return 0
 
     score = 0.0
+    trends = (mtf_confirmation or {}).get("trends", {})
+    h1, m15 = trends.get("H1", "HOLD"), trends.get("M15", "HOLD")
 
-    # MTF: 25
-    if mtf_confirmation:
-        trends = mtf_confirmation.get("trends", {})
-        h1 = trends.get("H1", "HOLD")
-        m15 = trends.get("M15", "HOLD")
+    # MTF = 30
+    if (signal == "BUY" and h1 == "BUY" and m15 == "BUY") or (
+        signal == "SELL" and h1 == "SELL" and m15 == "SELL"
+    ):
+        score += 30
 
-        if signal == "BUY" and h1 == "BUY" and m15 == "BUY":
-            score += 25
-        elif signal == "SELL" and h1 == "SELL" and m15 == "SELL":
-            score += 25
-        elif signal == "BUY" and h1 == "BUY":
-            score += 12
-        elif signal == "SELL" and h1 == "SELL":
-            score += 12
-
-    # Trend alignment: 15
-    if signal == "BUY" and trend == "BULLISH":
-        score += 15
-    elif signal == "SELL" and trend == "BEARISH":
+    # Local trend = 15
+    if (signal == "BUY" and trend == "BULLISH") or (signal == "SELL" and trend == "BEARISH"):
         score += 15
 
-    # Structure: 15 for breakout, 8 for orderly range continuation
-    if signal == "BUY":
-        if structure == "BULLISH_BREAK":
-            score += 15
-        elif structure == "RANGE":
-            score += 8
-    else:
-        if structure == "BEARISH_BREAK":
-            score += 15
-        elif structure == "RANGE":
-            score += 8
+    # Directional DI confirmation = 15
+    if plus_di is not None and minus_di is not None and _direction_ok(signal, plus_di, minus_di, adx):
+        score += 15
 
-    # RSI: 10
-    if rsi is not None and np.isfinite(rsi):
-        if signal == "BUY":
-            if 54 <= rsi <= 66:
-                score += 10
-            elif 50 <= rsi <= 72:
-                score += 7
-        else:
-            if 34 <= rsi <= 46:
-                score += 10
-            elif 28 <= rsi <= 50:
-                score += 7
-
-    # ADX: 10
-    if adx is not None and np.isfinite(adx):
-        if adx >= 30:
-            score += 10
-        elif adx >= 25:
-            score += 8
-        elif adx >= 18:
-            score += 5
-
-    # Momentum: 10
-    m = abs(float(momentum))
-    if (signal == "BUY" and momentum > 0) or (signal == "SELL" and momentum < 0):
-        if m >= 0.30:
-            score += 10
-        elif m >= 0.15:
-            score += 8
-        elif m >= 0.05:
-            score += 6
-        else:
-            score += 3
-
-    # Volatility: 5
-    if volatility_confirmation(atr_value, atr_average):
+    # Structure = 10
+    good_break = (signal == "BUY" and structure == "BULLISH_BREAK") or (
+        signal == "SELL" and structure == "BEARISH_BREAK"
+    )
+    if good_break:
+        score += 10
+    elif structure == "RANGE":
         score += 5
 
-    # Candle: 5
+    # Momentum = 10, direction + strength
+    m = abs(float(momentum))
+    directional_momentum = (signal == "BUY" and momentum > 0) or (signal == "SELL" and momentum < 0)
+    if directional_momentum:
+        score += 10 if m >= 0.15 else 7 if m >= 0.05 else 3
+
+    # RSI = 8
+    if _rsi_ok(signal, rsi):
+        score += 8
+
+    # Volatility = 5
+    if _volatility_ok(atr_value, atr_average):
+        score += 5
+
+    # Candle = 5
     if candle_confirmed:
         score += 5
+
+    # EMA slope = 2
+    if trend_slope_ok:
+        score += 2
 
     return int(max(0, min(100, round(score))))
 
@@ -377,143 +237,115 @@ def precision_grade(score):
     return "D"
 
 
-def _mtf_permission(signal, mtf_confirmation):
-    if not mtf_confirmation:
-        return True
-
-    trends = mtf_confirmation.get("trends", {})
-    h1 = trends.get("H1", "HOLD")
-    m15 = trends.get("M15", "HOLD")
-
-    if signal == "BUY":
-        return h1 == "BUY" and m15 == "BUY"
-    if signal == "SELL":
-        return h1 == "SELL" and m15 == "SELL"
-    return False
-
-
-def generate_signal(
-    df,
-    ema_fast=20,
-    ema_slow=50,
-    atr_period=14,
-    mtf_confirmation=None,
+def precision_entry_filter(
+    signal, trend, structure, momentum, atr_value, close, ema_fast,
+    ema_slow, rsi, adx, atr_average, candle_confirmed,
+    mtf_confirmation=None, plus_di=None, minus_di=None, trend_slope_ok=False
 ):
+    if signal not in ("BUY", "SELL"):
+        return False
+    if not _mtf_permission(signal, mtf_confirmation):
+        return False
+    if signal == "BUY":
+        if not (trend == "BULLISH" and ema_fast > ema_slow and momentum > 0):
+            return False
+        if structure not in ("BULLISH_BREAK", "RANGE"):
+            return False
+    else:
+        if not (trend == "BEARISH" and ema_fast < ema_slow and momentum < 0):
+            return False
+        if structure not in ("BEARISH_BREAK", "RANGE"):
+            return False
+
+    if not _direction_ok(signal, plus_di, minus_di, adx):
+        return False
+    if not _trend_slope_ok(signal, pd.Series([0, 0, 0, 0, 0, 1 if trend_slope_ok else 0])):
+        return False
+    if not _rsi_ok(signal, rsi):
+        return False
+    if not _volatility_ok(atr_value, atr_average):
+        return False
+    if not _ema_distance_ok(signal, close, ema_fast, atr_value):
+        return False
+    if not candle_confirmed:
+        return False
+    return True
+
+
+def generate_signal(df, ema_fast=20, ema_slow=50, atr_period=14, mtf_confirmation=None):
     neutral = {
-        "signal": "HOLD",
-        "trend": "NEUTRAL",
-        "structure": "UNKNOWN",
-        "momentum": 0.0,
-        "score": 0,
-        "precision_score": 0,
-        "precision_grade": "D",
-        "precision_pass": False,
-        "atr": None,
-        "atr_average": None,
-        "rsi": 50.0,
-        "adx": 0.0,
-        "ema_fast": None,
-        "ema_slow": None,
-        "candle_confirmed": False,
-        "reason": "insufficient_data",
+        "signal": "HOLD", "candidate_signal": "HOLD",
+        "trend": "NEUTRAL", "structure": "UNKNOWN", "momentum": 0.0,
+        "score": 0, "precision_score": 0, "precision_grade": "D",
+        "precision_pass": False, "atr": None, "atr_average": None,
+        "rsi": 50.0, "adx": 0.0, "plus_di": 0.0, "minus_di": 0.0,
+        "ema_fast": None, "ema_slow": None, "candle_confirmed": False,
+        "trend_slope_ok": False, "reason": "insufficient_data",
     }
 
-    if df is None or len(df) < max(ema_slow + 10, 80):
+    if df is None or len(df) < max(ema_slow + 60, 120):
         return neutral
 
     data = df.copy().reset_index(drop=True)
-
-    close = data["close"].astype(float)
-    ema_fast_series = calculate_ema(close, ema_fast)
-    ema_slow_series = calculate_ema(close, ema_slow)
+    close_series = data["close"].astype(float)
+    ef_series = calculate_ema(close_series, ema_fast)
+    es_series = calculate_ema(close_series, ema_slow)
     atr_series = calculate_atr(data, atr_period)
-    rsi_series = calculate_rsi(close, 14)
-    adx_series = calculate_adx(data, 14)
+    rsi_series = calculate_rsi(close_series, 14)
+    adx_series, pdi_series, mdi_series = calculate_adx_components(data, 14)
 
-    ema_f = float(ema_fast_series.iloc[-1])
-    ema_s = float(ema_slow_series.iloc[-1])
+    ef, es = float(ef_series.iloc[-1]), float(es_series.iloc[-1])
     atr = float(atr_series.iloc[-1])
     atr_avg = float(atr_series.rolling(50).mean().iloc[-1])
     rsi = float(rsi_series.iloc[-1])
     adx = float(adx_series.iloc[-1])
+    pdi, mdi = float(pdi_series.iloc[-1]), float(mdi_series.iloc[-1])
     momentum = float(calculate_momentum(data))
     structure = detect_structure(data)
     trend = detect_trend(data, ema_fast, ema_slow)
 
-    if not all(np.isfinite(x) for x in (ema_f, ema_s, atr, atr_avg, rsi, adx, momentum)):
+    values = [ef, es, atr, atr_avg, rsi, adx, pdi, mdi, momentum]
+    if not all(np.isfinite(x) for x in values):
         return neutral
 
+    slope_ok_buy = _trend_slope_ok("BUY", ef_series)
+    slope_ok_sell = _trend_slope_ok("SELL", ef_series)
     candle_buy = candle_confirmation(data, "BUY")
     candle_sell = candle_confirmation(data, "SELL")
 
-    # Candidate direction is deliberately broad. Precision filters decide.
     buy_candidate = (
-        trend == "BULLISH"
-        and ema_f > ema_s
-        and momentum > 0
-        and rsi >= 50
+        trend == "BULLISH" and ef > es and momentum > 0 and rsi >= 48
+        and _mtf_permission("BUY", mtf_confirmation)
     )
     sell_candidate = (
-        trend == "BEARISH"
-        and ema_f < ema_s
-        and momentum < 0
-        and rsi <= 50
+        trend == "BEARISH" and ef < es and momentum < 0 and rsi <= 52
+        and _mtf_permission("SELL", mtf_confirmation)
     )
 
-    if buy_candidate and _mtf_permission("BUY", mtf_confirmation):
-        signal = "BUY"
-        candle_ok = candle_buy
-    elif sell_candidate and _mtf_permission("SELL", mtf_confirmation):
-        signal = "SELL"
-        candle_ok = candle_sell
+    if buy_candidate and _direction_ok("BUY", pdi, mdi, adx) and slope_ok_buy:
+        signal, candle_ok, slope_ok = "BUY", candle_buy, slope_ok_buy
+    elif sell_candidate and _direction_ok("SELL", pdi, mdi, adx) and slope_ok_sell:
+        signal, candle_ok, slope_ok = "SELL", candle_sell, slope_ok_sell
     else:
         return {
-            **neutral,
-            "trend": trend,
-            "structure": structure,
-            "momentum": momentum,
-            "atr": atr,
-            "atr_average": atr_avg,
-            "rsi": rsi,
-            "adx": adx,
-            "ema_fast": ema_f,
-            "ema_slow": ema_s,
-            "reason": "no_directional_candidate",
+            **neutral, "trend": trend, "structure": structure, "momentum": momentum,
+            "atr": atr, "atr_average": atr_avg, "rsi": rsi, "adx": adx,
+            "plus_di": pdi, "minus_di": mdi, "ema_fast": ef, "ema_slow": es,
+            "reason": "no_high_quality_candidate",
         }
 
-    precision_score = calculate_precision_score(
-        signal=signal,
-        trend=trend,
-        structure=structure,
-        momentum=momentum,
-        atr_value=atr,
-        close=float(close.iloc[-1]),
-        ema_fast=ema_f,
-        ema_slow=ema_s,
-        rsi=rsi,
-        adx=adx,
-        atr_average=atr_avg,
-        candle_confirmed=candle_ok,
-        mtf_confirmation=mtf_confirmation,
+    score = calculate_precision_score(
+        signal, trend, structure, momentum, atr, float(close_series.iloc[-1]),
+        ef, es, rsi, adx, atr_avg, candle_ok, mtf_confirmation,
+        pdi, mdi, slope_ok
     )
 
-    precision_pass = precision_entry_filter(
-        signal=signal,
-        trend=trend,
-        structure=structure,
-        momentum=momentum,
-        atr_value=atr,
-        close=float(close.iloc[-1]),
-        ema_fast=ema_f,
-        ema_slow=ema_s,
-        rsi=rsi,
-        adx=adx,
-        atr_average=atr_avg,
-        candle_confirmed=candle_ok,
+    # V7 quality floor. The score is only valid after directional filters pass.
+    precision_pass = score >= 75 and precision_entry_filter(
+        signal, trend, structure, momentum, atr, float(close_series.iloc[-1]),
+        ef, es, rsi, adx, atr_avg, candle_ok, mtf_confirmation,
+        pdi, mdi, slope_ok
     )
-
-    # score is retained for compatibility with the existing bot.
-    score = precision_score
 
     return {
         "signal": signal if precision_pass else "HOLD",
@@ -522,19 +354,18 @@ def generate_signal(
         "structure": structure,
         "momentum": momentum,
         "score": score,
-        "precision_score": precision_score,
-        "precision_grade": precision_grade(precision_score),
+        "precision_score": score,
+        "precision_grade": precision_grade(score),
         "precision_pass": bool(precision_pass),
         "atr": atr,
         "atr_average": atr_avg,
         "rsi": rsi,
         "adx": adx,
-        "ema_fast": ema_f,
-        "ema_slow": ema_s,
+        "plus_di": pdi,
+        "minus_di": mdi,
+        "ema_fast": ef,
+        "ema_slow": es,
         "candle_confirmed": bool(candle_ok),
-        "reason": (
-            "precision_pass"
-            if precision_pass
-            else "precision_filter_rejected"
-        ),
+        "trend_slope_ok": bool(slope_ok),
+        "reason": "precision_pass" if precision_pass else "quality_filter_rejected",
     }
