@@ -39,9 +39,9 @@ jobs:
 
       - name: Run ChatGPT assistant
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          APP_ID: ${{ secrets.APP_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+          OPENAI_API_KEY: ${{ Iv23liDfKZbk7c7wFTy1.OPENAI_API_KEY }}
+          APP_ID: ${{ 4505606.APP_ID }}
+          APP_PRIVATE_KEY: ${{ 0ca20e47589aebb12b126a860ef90dfa19505b1a.APP_PRIVATE_KEY }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           if [ ! -f .github/scripts/chatgpt_assistant.py ]; then
