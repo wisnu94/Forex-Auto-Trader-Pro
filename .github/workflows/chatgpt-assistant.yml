@@ -19,7 +19,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Debug: list .github directory
+      - name: "Debug: list .github directory"
         run: |
           echo "PWD: $(pwd)"
           echo "Listing .github directory:"
