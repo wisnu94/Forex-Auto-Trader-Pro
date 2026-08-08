@@ -73,7 +73,12 @@ def main():
     print(f"Bars      : {BARS}")
     print()
 
-    df = get_bars(symbol=SYMBOL, timeframe=TIMEFRAME, count=BARS)
+    df = get_bars(
+        symbol=SYMBOL,
+        timeframe=TIMEFRAME,
+        count=BARS,
+        source="YAHOO",
+    )
     if df is None or len(df) == 0:
         raise RuntimeError("Data kosong.")
 
