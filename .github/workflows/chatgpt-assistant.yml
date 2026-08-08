@@ -1,30 +1,51 @@
-  - name: "Debug: list .github directory"
-    run: |
-      echo "PWD: $(pwd)"
-      echo "Listing .github directory:"
-      ls -la .github || true
-      echo "Listing .github/scripts directory:"
-      ls -la .github/scripts || true
+name: ChatGPT Assistant (changelog & lint suggestions)
 
-  - name: Set up Python
-    uses: actions/setup-python@v4
-    with:
-      python-version: '3.11'
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
 
-  - name:Install dependencies
-    run: |
-      python -m pip install --upgrade pip
-      pip install --no-cache-dir openai flake8 requests pyjwt[crypto]
+permissions:
+  contents: write
 
-  - name: Run ChatGPT assistant
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      APP_ID: ${{ secrets.APP_ID }}
-      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
-      GITHUB_REPOSITORY: ${{ github.repository }}
-    run: |
-      if [ ! -f .github/scripts/chatgpt_assistant.py ]; then
-        echo ".github/scripts/chatgpt_assistant.py not found! Exiting."
-        exit 2
-      fi
-      python .github/scripts/chatgpt_assistant.py
+jobs:
+  chatgpt-assistant:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "Debug: list .github directory"
+        run: |
+          echo "PWD: $(pwd)"
+          echo "Listing .github directory:"
+          ls -la .github || true
+          echo "Listing .github/scripts directory:"
+          ls -la .github/scripts || true
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir pyjwt[crypto] requests openai flake8
+
+      - name: Run ChatGPT assistant
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ ! -f .github/scripts/chatgpt_assistant.py ]; then
+            echo ".github/scripts/chatgpt_assistant.py not found! Exiting."
+            exit 2
+          fi
+          python .github/scripts/chatgpt_assistant.py
