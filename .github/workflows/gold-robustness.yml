@@ -26,4 +26,4 @@ jobs:
 
       - name: Run robustness audit
         run: |
-          python robustness_audit.py
+          python gold_robustness_audit.py
