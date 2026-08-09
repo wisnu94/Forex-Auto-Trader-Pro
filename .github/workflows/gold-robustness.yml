@@ -1,12 +1,29 @@
-# Gold Robustness V1
+name: Gold Robustness Audit
 
-Tambah:
-- `gold_robustness_audit.py` di root repo.
-- `.github/workflows/gold-robustness.yml` di folder `.github/workflows/`.
+on:
+  workflow_dispatch:
 
-Tidak mengubah strategy.py/backtest.py/config.py.
+jobs:
+  robustness:
+    runs-on: ubuntu-latest
 
-CI memakai GC=F sebagai proxy XAUUSD karena MT5 terminal tidak tersedia di GitHub-hosted runner. Live tetap MT5 XAUUSD.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-Audit: full sample, chronological 60/40 holdout, cost stress 0.00R-0.20R, dan CSV trade-level.
-`NOT_READY` berarti bukti belum cukup kuat, bukan error software.
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          pip install yfinance pandas numpy
+
+      - name: Run robustness audit
+        run: |
+          python robustness_audit.py
