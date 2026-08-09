@@ -1,0 +1,12 @@
+# Gold Robustness V1
+
+Tambah:
+- `gold_robustness_audit.py` di root repo.
+- `.github/workflows/gold-robustness.yml` di folder `.github/workflows/`.
+
+Tidak mengubah strategy.py/backtest.py/config.py.
+
+CI memakai GC=F sebagai proxy XAUUSD karena MT5 terminal tidak tersedia di GitHub-hosted runner. Live tetap MT5 XAUUSD.
+
+Audit: full sample, chronological 60/40 holdout, cost stress 0.00R-0.20R, dan CSV trade-level.
+`NOT_READY` berarti bukti belum cukup kuat, bukan error software.
