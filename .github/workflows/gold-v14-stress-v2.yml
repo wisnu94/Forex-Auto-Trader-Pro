@@ -1,0 +1,46 @@
+name: Gold V14 Stress V2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stress-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy yfinance python-dotenv
+
+      - name: Run V14 stress V2
+        env:
+          ROBUSTNESS_BARS: "4608"
+          ROBUSTNESS_SYMBOL: "XAUUSD"
+          MC_RUNS: "5000"
+          MC_SEED: "1402"
+        run: |
+          python gold_v14_stress_v2.py
+
+      - name: Upload stress results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gold-v14-stress-v2-results
+          path: |
+            gold_v14_bootstrap_stress.csv
+            gold_v14_direction_stress.csv
+            gold_v14_score_sensitivity.csv
+          if-no-files-found: ignore
