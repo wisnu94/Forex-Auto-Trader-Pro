@@ -62,7 +62,12 @@ def _build_mtf_confirmation(history):
 
     m15 = history.copy().reset_index(drop=True)
     h1 = _resample_from_m15(m15, 4)
-    m1 = _build_m1_proxy(m15)
+
+    # Performance optimization: only build the synthetic M1 proxy from
+    # a recent window. The old version rebuilt M1 from the full history
+    # on every backtest candle, causing unnecessary CI workload.
+    m1_source = m15.tail(160).reset_index(drop=True)
+    m1 = _build_m1_proxy(m1_source)
 
     trends = {
         "H1": timeframe_trend(h1, fast_period=20, slow_period=50),
