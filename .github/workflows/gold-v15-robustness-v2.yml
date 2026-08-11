@@ -1,0 +1,48 @@
+name: Gold V15 Robustness V2
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "gold_v15_robustness_v2.py"
+      - "backtest.py"
+      - "strategy.py"
+      - "mtf.py"
+      - "data.py"
+      - "config.py"
+      - ".github/workflows/gold-v15-robustness-v2.yml"
+
+jobs:
+  robustness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      ROBUSTNESS_BARS: "4608"
+      ROBUSTNESS_SYMBOL: "XAUUSD"
+      AUDIT_COST_R: "0.10"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run V15 robustness audit
+        run: python gold_v15_robustness_v2.py
+
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gold-v15-robustness-v2-results
+          path: |
+            gold_v15_robustness_v2_windows.csv
+            gold_v15_robustness_v2_candidates.csv
+          if-no-files-found: ignore
