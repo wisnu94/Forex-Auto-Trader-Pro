@@ -1,0 +1,43 @@
+name: Gold V15 Score80 Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  score80-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy yfinance python-dotenv
+
+      - name: Run Score 80 validation
+        env:
+          ROBUSTNESS_BARS: "4608"
+          ROBUSTNESS_SYMBOL: "XAUUSD"
+          TEST_SCORE: "80"
+          AUDIT_COST_R: "0.10"
+        run: |
+          python gold_v15_score80_validation.py
+
+      - name: Upload validation result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gold-v15-score80-validation
+          path: gold_v15_score80_validation.csv
+          if-no-files-found: ignore
