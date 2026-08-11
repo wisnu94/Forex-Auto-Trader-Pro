@@ -88,7 +88,7 @@ def _get(row, key, default=0.0):
     return getattr(row, key, default)
 
 
-def generate_signal(df, min_score=78, rr=1.8, atr_mult=1.6) -> Dict[str, Any]:
+def _v12_generate_signal(df, min_score=78, rr=1.8, atr_mult=1.6) -> Dict[str, Any]:
     """
     Accepts a pandas-like dataframe with columns:
     open, high, low, close and optionally volume.
@@ -205,6 +205,108 @@ def generate_signal(df, min_score=78, rr=1.8, atr_mult=1.6) -> Dict[str, Any]:
     }
 
 
+def _compat_atr(df, period=14):
+    """Small ATR helper used only to satisfy the existing backtest contract."""
+    if len(df) <= period:
+        return None
+    highs = [float(x) for x in df["high"]]
+    lows = [float(x) for x in df["low"]]
+    closes = [float(x) for x in df["close"]]
+    trs = [highs[0] - lows[0]]
+    for j in range(1, len(closes)):
+        trs.append(max(
+            highs[j] - lows[j],
+            abs(highs[j] - closes[j - 1]),
+            abs(lows[j] - closes[j - 1]),
+        ))
+    value = sum(trs[:period]) / period
+    for x in trs[period:]:
+        value = (value * (period - 1) + x) / period
+    return value
+
+
+def generate_signal(
+    df,
+    ema_fast=20,
+    ema_slow=50,
+    atr_period=14,
+    mtf_confirmation=None,
+    min_score=70,
+    **kwargs,
+):
+    """
+    Compatibility adapter for the existing Forex-Auto-Trader-Pro backtest.py.
+
+    The previous V12 implementation used a different public function
+    signature. This adapter preserves V12 logic while exposing the API that
+    backtest.py already calls.
+    """
+    result = _v12_generate_signal(
+        df,
+        min_score=min_score,
+        rr=kwargs.get("reward_risk", kwargs.get("rr", 1.8)),
+        atr_mult=kwargs.get("atr_sl_multiplier", kwargs.get("atr_mult", 1.6)),
+    )
+
+    action = result.get("action", "WAIT")
+    score = int(result.get("score", 0))
+    signal = action if action in ("BUY", "SELL") else "HOLD"
+
+    # The existing backtest applies the H1/M15 directional gate separately.
+    # We only use MTF here as an additional confidence signal when available.
+    mtf = mtf_confirmation or {}
+    trends = mtf.get("trends", {}) if isinstance(mtf, dict) else {}
+    h1 = trends.get("H1")
+    m15 = trends.get("M15")
+    mtf_aligned = (
+        (signal == "BUY" and h1 == "BUY" and m15 == "BUY")
+        or (signal == "SELL" and h1 == "SELL" and m15 == "SELL")
+    )
+
+    # Keep the V12 score intact; do not artificially inflate it with MTF.
+    precision_pass = bool(signal in ("BUY", "SELL") and score >= int(min_score))
+
+    atr = _compat_atr(df, atr_period)
+    close = float(df.iloc[-1]["close"])
+
+    # Lightweight diagnostic values for backtest.csv compatibility.
+    rsi = None
+    if len(df) >= 15:
+        closes = [float(x) for x in df["close"]]
+        gains = []
+        losses = []
+        for j in range(1, len(closes)):
+            delta = closes[j] - closes[j - 1]
+            gains.append(max(delta, 0.0))
+            losses.append(max(-delta, 0.0))
+        avg_gain = sum(gains[-14:]) / 14
+        avg_loss = sum(losses[-14:]) / 14
+        rsi = 100.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+
+    return {
+        "signal": signal,
+        "precision_score": score,
+        "precision_pass": precision_pass,
+        "precision_grade": (
+            "A+" if score >= 95 else
+            "A" if score >= 88 else
+            "B" if score >= 78 else
+            "C" if score >= 70 else
+            "D"
+        ),
+        "reason": result.get("reason", "V12"),
+        "atr": atr,
+        "rsi": rsi,
+        "adx": None,
+        "momentum": close - float(df.iloc[-4]["close"]) if len(df) >= 4 else 0.0,
+        "atr_average": atr,
+        "plus_di": None,
+        "minus_di": None,
+        "mtf_score": mtf.get("score", 0) if isinstance(mtf, dict) else 0,
+        "mtf_aligned": mtf_aligned,
+    }
+
+
 def backtest_signals(df, min_score=78, rr=1.8, atr_mult=1.6):
     """Simple non-live evaluator. No parameter fitting or trade execution."""
     results = []
@@ -214,6 +316,3 @@ def backtest_signals(df, min_score=78, rr=1.8, atr_mult=1.6):
     return results
 
 
-if __name__ == "__main__":
-    print("GOLD Precision V12 strategy module loaded.")
-    print("Live trading is disabled in this file.")
