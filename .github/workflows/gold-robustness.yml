@@ -3,10 +3,13 @@ name: Gold Robustness
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   gold-robustness:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
 
     steps:
       - name: Checkout
@@ -22,9 +25,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas yfinance python-dotenv
 
-      - name: Run Gold Robustness Audit
+      - name: Run Gold Robustness Audit - LONG SAMPLE
         env:
-          ROBUSTNESS_BARS: "3000"
+          ROBUSTNESS_BARS: "5000"
           ROBUSTNESS_SYMBOL: "XAUUSD"
         run: |
           python gold_robustness_audit.py
@@ -33,7 +36,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gold-robustness-results
+          name: gold-robustness-long-results
           path: |
             gold_robustness_trades.csv
             gold_parameter_stability.csv
