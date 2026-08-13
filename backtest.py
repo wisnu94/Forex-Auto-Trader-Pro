@@ -126,7 +126,12 @@ def backtest_strategy(
         mtf = _build_mtf_confirmation(history)
         result = generate_signal(
             history, ema_fast=ema_fast, ema_slow=ema_slow,
-            atr_period=atr_period, mtf_confirmation=mtf
+            atr_period=atr_period, mtf_confirmation=mtf,
+            # IMPORTANT: propagate the backtest candidate's score gate into
+            # the canonical signal engine. Without this, candidate runs such
+            # as S79/S80 were scored after signal generation, while the engine
+            # itself still evaluated the default min_score=70 gate.
+            min_score=min_score,
         )
 
         signal = result.get("signal", "HOLD")
