@@ -1,0 +1,29 @@
+name: Gold V15 Broker XAUUSD Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'data/xauusd_m15_broker.csv'
+      - 'gold_v15_broker_csv_audit.py'
+      - '.github/workflows/gold-v15-broker-csv-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BROKER_DATA_PATH: data/xauusd_m15_broker.csv
+      BROKER_MIN_BARS: '20000'
+      AUDIT_COST_R: '0.10'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - run: python gold_v15_broker_csv_audit.py
