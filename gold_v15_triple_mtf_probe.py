@@ -1,156 +1,69 @@
-"""V15 structural probe: require H1 + M15 + M1 alignment for S80.
+"""V15 Triple-MTF probe.
 
-This is an experiment only. It does not modify live trading configuration.
-It reuses the canonical backtest and tightens entry confirmation by rejecting
-signals whose synthetic M1 trend does not agree with H1/M15.
+Canonical S80 backtest already requires H1+M15 agreement. This probe therefore
+MUST NOT monkey-patch signal generation: it takes the canonical trade stream
+and applies the incremental M1 confirmation to the recorded trade attribution.
+No live trading changes are made.
 """
 from __future__ import annotations
-
-import os
-import time
+import os, time
 import numpy as np
 import pandas as pd
-
-import backtest as bt
+from backtest import backtest_strategy
 from data import get_bars
 
 BARS = int(os.getenv("ROBUSTNESS_BARS", "4608"))
 SYMBOL = os.getenv("ROBUSTNESS_SYMBOL", "XAUUSD")
 COST = float(os.getenv("AUDIT_COST_R", "0.10"))
 BOOTSTRAP_RUNS = min(int(os.getenv("BOOTSTRAP_RUNS", "1500")), 1500)
-SCORE = 80
-SL = 1.6
-RR = 1.6
+SCORE, SL, RR = 80, 1.6, 1.6
+WINDOWS = (("W1_0_50",0,.50),("W2_25_75",.25,.75),("W3_50_100",.50,1),("W4_0_60",0,.60),("W5_40_100",.40,1))
+HOLDOUTS = (("HOLDOUT_40",.60,1),("HOLDOUT_30",.70,1),("HOLDOUT_25",.75,1),("HOLDOUT_50",.50,1))
 
-WINDOWS = (
-    ("W1_0_50", 0.00, 0.50),
-    ("W2_25_75", 0.25, 0.75),
-    ("W3_50_100", 0.50, 1.00),
-    ("W4_0_60", 0.00, 0.60),
-    ("W5_40_100", 0.40, 1.00),
-)
-HOLDOUTS = (
-    ("HOLDOUT_40", 0.60, 1.00),
-    ("HOLDOUT_30", 0.70, 1.00),
-    ("HOLDOUT_25", 0.75, 1.00),
-    ("HOLDOUT_50", 0.50, 1.00),
-)
+def metrics(trades):
+    r=np.asarray([float(t["r_multiple"]) for t in trades],dtype=float); n=len(r); wins=int(np.sum(r>0))
+    gp=float(r[r>0].sum()) if np.any(r>0) else 0.; gl=float(abs(r[r<0].sum())) if np.any(r<0) else 0.
+    pf=gp/gl if gl else (float("inf") if gp else 0.); net=float(r.sum())
+    return {"trades":n,"wins":wins,"win_rate":wins/n*100 if n else 0.,"profit_factor":pf,"net_r":net,"expectancy_r":net/n if n else 0.,"after_cost_r":net-COST*n}
 
+def row(label,m):
+    pf="inf" if not np.isfinite(m["profit_factor"]) else f"{m['profit_factor']:.3f}"
+    print(f"{label:16s} trades={m['trades']:3d} WR={m['win_rate']:6.2f}% PF={pf:>7s} After={m['after_cost_r']:7.3f}")
 
-def summarize(label, result):
-    trades = result.get("trades", [])
-    n = len(trades)
-    net = float(result.get("net_r", 0.0))
-    return {
-        "candidate": "S80_M1_CONFIRM",
-        "label": label,
-        "score": SCORE,
-        "atr_sl": SL,
-        "rr": RR,
-        "trades": n,
-        "wins": int(result.get("wins", 0)),
-        "win_rate": float(result.get("win_rate", 0.0)),
-        "profit_factor": float(result.get("profit_factor", 0.0)),
-        "net_r": net,
-        "expectancy_r": float(result.get("expectancy_r", 0.0)),
-        "after_cost_r": round(net - COST * n, 4),
-    }
+def window(trades,a,b,total):
+    s,e=int(total*a),int(total*b)
+    return [t for t in trades if s<=int(t.get("entry_index",-1))<e]
 
-
-def filter_trades(full, a, b, total_bars):
-    start, end = int(total_bars * a), int(total_bars * b)
-    subset = [t for t in full.get("trades", []) if start <= int(t.get("entry_index", t.get("index", -1))) < end]
-    r = [float(t["r_multiple"]) for t in subset]
-    wins = sum(x > 0 for x in r)
-    gp = sum(x for x in r if x > 0)
-    gl = abs(sum(x for x in r if x < 0))
-    pf = gp / gl if gl else (float("inf") if gp else 0.0)
-    net = sum(r)
-    return {"trades": subset, "wins": wins, "win_rate": wins / len(subset) * 100 if subset else 0.0,
-            "profit_factor": pf, "net_r": net, "expectancy_r": net / len(subset) if subset else 0.0}
-
-
-def bootstrap(values, seed=1604):
-    if not values:
-        return 0.0, 0.0, 1.0
-    x = np.asarray(values, dtype=float) - COST
-    rng = np.random.default_rng(seed)
-    n = len(x)
-    finals = np.empty(BOOTSTRAP_RUNS)
-    for start in range(0, BOOTSTRAP_RUNS, 500):
-        m = min(500, BOOTSTRAP_RUNS - start)
-        idx = rng.integers(0, n, size=(m, n))
-        finals[start:start + m] = x[idx].sum(axis=1)
-    return float(np.percentile(finals, 5)), float(np.percentile(finals, 50)), float(np.mean(finals <= 0))
-
+def bootstrap(values,seed=1604):
+    if not values:return 0.,0.,1.
+    x=np.asarray(values,dtype=float)-COST; rng=np.random.default_rng(seed); n=len(x); out=np.empty(BOOTSTRAP_RUNS)
+    for start in range(0,BOOTSTRAP_RUNS,500):
+        m=min(500,BOOTSTRAP_RUNS-start); idx=rng.integers(0,n,size=(m,n)); out[start:start+m]=x[idx].sum(axis=1)
+    return float(np.percentile(out,5)),float(np.percentile(out,50)),float(np.mean(out<=0))
 
 def main():
-    print("=" * 78)
-    print("FOREX AUTO TRADER PRO - GOLD V15 TRIPLE MTF PROBE")
-    print("=" * 78)
+    t0=time.monotonic(); print("="*78); print("FOREX AUTO TRADER PRO - GOLD V15 TRIPLE MTF PROBE"); print("="*78)
     print(f"Symbol : {SYMBOL} | M15 | bars={BARS} | S80 | SL={SL} | RR={RR}")
-    print("Experiment: require H1 + M15 + M1 trend alignment")
-    print("Live trading: NOT ENABLED")
+    print("Incremental filter: canonical H1+M15 trades -> require recorded M1 agreement")
+    print("Parameter fitting: NONE"); print("Live trading: NOT ENABLED")
+    df=get_bars(SYMBOL,"M15",count=BARS,source="YAHOO")
+    if len(df)<1000: raise RuntimeError(f"Insufficient bars: {len(df)}")
+    canonical=backtest_strategy(df=df,ema_fast=20,ema_slow=50,atr_period=14,atr_sl_multiplier=SL,reward_risk=RR,min_score=SCORE)
+    all_trades=canonical.get("trades",[])
+    triple=[t for t in all_trades if t.get("signal")==t.get("mtf_m1") and t.get("mtf_h1")==t.get("signal") and t.get("mtf_m15")==t.get("signal")]
+    rejected=len(all_trades)-len(triple)
+    print("\nFILTER ATTRIBUTION"); print(f"Canonical H1+M15 trades : {len(all_trades)}"); print(f"Rejected by M1          : {rejected}"); print(f"Triple-MTF trades       : {len(triple)}")
+    full=metrics(triple); print("\nTRIPLE-MTF FULL SAMPLE"); row("FULL",full)
+    windows=[]; print("\nROLLING WINDOWS")
+    for label,a,b in WINDOWS:
+        x=metrics(window(triple,a,b,len(df))); x.update(candidate="S80_TRIPLE_MTF",label=label,positive=x["after_cost_r"]>0); windows.append(x); row(label,x)
+    holdouts=[]; print("\nRECENT HOLDOUTS")
+    for label,a,b in HOLDOUTS:
+        x=metrics(window(triple,a,b,len(df))); x.update(candidate="S80_TRIPLE_MTF",label=label,positive=x["after_cost_r"]>0); holdouts.append(x); row(label,x)
+    p05,p50,prob=bootstrap([float(t["r_multiple"]) for t in triple]); print("\nBOOTSTRAP COST STRESS"); print(f"P05 final R      : {p05:.3f}"); print(f"P50 final R      : {p50:.3f}"); print(f"Probability <=0  : {prob*100:.2f}%")
+    wp=sum(x["positive"] for x in windows)>=4; hp=sum(x["positive"] for x in holdouts)>=3; fp=full["after_cost_r"]>0 and full["trades"]>=20; bp=p05>0 and prob<.10; ready=fp and wp and hp and bp
+    print("\nTRIPLE-MTF DECISION"); print(f"Full after-cost positive + 20 trades : {'PASS' if fp else 'FAIL'}"); print(f"Windows 4/5 positive                : {'PASS' if wp else 'FAIL'}"); print(f"Holdouts 3/4 positive                : {'PASS' if hp else 'FAIL'}"); print(f"Bootstrap P05 > 0 AND Prob<=0 <10%  : {'PASS' if bp else 'FAIL'}"); print("STATUS: READY_CANDIDATE" if ready else "STATUS: REJECT_CANDIDATE"); print(f"Runtime seconds={time.monotonic()-t0:.2f}")
+    pd.DataFrame([full]).assign(candidate="S80_TRIPLE_MTF",p05=p05,p50=p50,probability_nonpositive=prob,canonical_trades=len(all_trades),m1_rejected=rejected).to_csv("gold_v15_triple_mtf_full.csv",index=False)
+    pd.DataFrame(windows).to_csv("gold_v15_triple_mtf_windows.csv",index=False); pd.DataFrame(holdouts).to_csv("gold_v15_triple_mtf_holdouts.csv",index=False)
 
-    df = get_bars(SYMBOL, "M15", count=BARS, source="YAHOO")
-    if len(df) < 1000:
-        raise RuntimeError(f"Insufficient bars: {len(df)}")
-
-    original = bt.generate_signal
-
-    def triple_mtf_signal(*args, **kwargs):
-        result = original(*args, **kwargs)
-        if result.get("signal") in ("BUY", "SELL"):
-            mtf = kwargs.get("mtf_confirmation") or {}
-            trends = mtf.get("trends", {}) if isinstance(mtf, dict) else {}
-            side = result["signal"]
-            if trends.get("H1") != side or trends.get("M15") != side or trends.get("M1") != side:
-                result = dict(result)
-                result["signal"] = "HOLD"
-                result["precision_pass"] = False
-        return result
-
-    bt.generate_signal = triple_mtf_signal
-    t0 = time.monotonic()
-    full = bt.backtest_strategy(df=df, ema_fast=20, ema_slow=50, atr_period=14,
-                                atr_sl_multiplier=SL, reward_risk=RR, min_score=SCORE)
-    row = summarize("FULL", full)
-    print("\nFULL SAMPLE")
-    print(f"Trades={row['trades']} WR={row['win_rate']:.2f}% PF={row['profit_factor']:.3f} NetR={row['net_r']:.3f} After={row['after_cost_r']:.3f}")
-
-    windows, holdouts = [], []
-    print("\nWINDOWS")
-    for label, a, b in WINDOWS:
-        x = summarize(label, filter_trades(full, a, b, len(df)))
-        x["positive"] = x["after_cost_r"] > 0
-        windows.append(x)
-        print(f"{label:14s} trades={x['trades']:3d} WR={x['win_rate']:6.2f}% PF={x['profit_factor']:.3f} After={x['after_cost_r']:7.3f}")
-
-    print("\nHOLDOUTS")
-    for label, a, b in HOLDOUTS:
-        x = summarize(label, filter_trades(full, a, b, len(df)))
-        x["positive"] = x["after_cost_r"] > 0
-        holdouts.append(x)
-        print(f"{label:14s} trades={x['trades']:3d} WR={x['win_rate']:6.2f}% PF={x['profit_factor']:.3f} After={x['after_cost_r']:7.3f}")
-
-    p05, p50, prob = bootstrap([float(t["r_multiple"]) for t in full.get("trades", [])])
-    print("\nBOOTSTRAP")
-    print(f"P05={p05:.3f} P50={p50:.3f} Prob<=0={prob*100:.2f}%")
-
-    print("\nPROBE DECISION")
-    print(f"Trades >= 20       : {'PASS' if row['trades'] >= 20 else 'FAIL'}")
-    print(f"After cost positive: {'PASS' if row['after_cost_r'] > 0 else 'FAIL'}")
-    print(f"Windows 4/5        : {'PASS' if sum(x['positive'] for x in windows) >= 4 else 'FAIL'}")
-    print(f"Holdouts 3/4        : {'PASS' if sum(x['positive'] for x in holdouts) >= 3 else 'FAIL'}")
-    print(f"Bootstrap P05 > 0  : {'PASS' if p05 > 0 else 'FAIL'}")
-    print(f"Prob <=0 < 10%     : {'PASS' if prob < 0.10 else 'FAIL'}")
-    print("STATUS: PASS_CANDIDATE" if row['after_cost_r'] > 0 and sum(x['positive'] for x in holdouts) >= 3 else "STATUS: REJECT_CANDIDATE")
-    print(f"Runtime seconds={time.monotonic()-t0:.2f}")
-
-    pd.DataFrame([row]).to_csv("gold_v15_triple_mtf_full.csv", index=False)
-    pd.DataFrame(windows).to_csv("gold_v15_triple_mtf_windows.csv", index=False)
-    pd.DataFrame(holdouts).to_csv("gold_v15_triple_mtf_holdouts.csv", index=False)
-
-
-if __name__ == "__main__":
-    main()
+if __name__=="__main__": main()
