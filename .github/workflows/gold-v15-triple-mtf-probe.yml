@@ -1,0 +1,46 @@
+name: Gold V15 Triple MTF Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "gold_v15_triple_mtf_probe.py"
+      - "backtest.py"
+      - "strategy.py"
+      - "mtf.py"
+      - "data.py"
+      - "config.py"
+      - ".github/workflows/gold-v15-triple-mtf-probe.yml"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      ROBUSTNESS_BARS: "4608"
+      ROBUSTNESS_SYMBOL: "XAUUSD"
+      AUDIT_COST_R: "0.10"
+      BOOTSTRAP_RUNS: "1500"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run triple MTF probe
+        run: python gold_v15_triple_mtf_probe.py
+      - name: Upload probe results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gold-v15-triple-mtf-probe-results
+          path: |
+            gold_v15_triple_mtf_full.csv
+            gold_v15_triple_mtf_windows.csv
+            gold_v15_triple_mtf_holdouts.csv
+          if-no-files-found: ignore
