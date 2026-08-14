@@ -1,0 +1,25 @@
+name: Gold V15 Data Quality
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'gold_v15_data_quality_audit.py'
+      - '.github/workflows/gold-v15-data-quality.yml'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      ROBUSTNESS_BARS: '4608'
+      ROBUSTNESS_SYMBOL: 'XAUUSD'
+      DATA_SOURCE: 'YAHOO'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - run: python gold_v15_data_quality_audit.py
