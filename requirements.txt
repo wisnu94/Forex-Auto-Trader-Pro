@@ -2,3 +2,6 @@ pandas
 yfinance
 numpy
 python-dotenv
+pytest
+ctrader-open-api
+Twisted
