@@ -1,0 +1,51 @@
+name: cTrader Cloud Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ctrader-cloud-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PYTHONUNBUFFERED: "1"
+      SYMBOL: EURUSD
+      TIMEFRAME: M15
+      TRADING_MODE: DEMO
+      CTRADER_EXECUTE: "false"
+      CTRADER_CLIENT_ID: ${{ secrets.CTRADER_CLIENT_ID }}
+      CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET }}
+      CTRADER_ACCESS_TOKEN: ${{ secrets.CTRADER_ACCESS_TOKEN }}
+      CTRADER_ACCOUNT_ID: ${{ secrets.CTRADER_ACCOUNT_ID }}
+      CTRADER_SYMBOL_ID: ${{ secrets.CTRADER_SYMBOL_ID }}
+      CTRADER_VOLUME_UNITS: ${{ secrets.CTRADER_VOLUME_UNITS }}
+      CTRADER_ALLOW_LIVE: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-ctrader.txt pytest
+
+      - name: Unit tests
+        run: python -m pytest -q tests/test_ctrader_cloud.py
+
+      - name: Strategy cloud dry run
+        run: python ctrader_cloud_runner.py
