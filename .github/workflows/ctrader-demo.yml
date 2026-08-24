@@ -1,0 +1,44 @@
+name: cTrader Demo Signal Gate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ctrader-demo-signal
+  cancel-in-progress: true
+
+jobs:
+  demo-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONUNBUFFERED: "1"
+      TRADING_MODE: DEMO
+      DATA_SOURCE: YAHOO
+      MT5_SYMBOL: EURUSD
+      TIMEFRAME: M15
+      CTRADER_EXECUTE: "false"
+      CTRADER_ALLOW_LIVE: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: python -m pytest -q
+
+      - name: Run signal gate
+        run: python -m signal_gate
