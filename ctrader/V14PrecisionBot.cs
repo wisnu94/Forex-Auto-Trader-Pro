@@ -192,15 +192,22 @@ public sealed class V14PrecisionBot : Robot
     private void RebuildRiskState()
     {
         _day = Server.Time.Date;
-        _dayStartBalance = Account.Balance;
+        var todaysTrades = History.FindAll(Label, SymbolName)
+            .Where(x => x.ClosingTime.Date == _day)
+            .OrderByDescending(x => x.ClosingTime)
+            .ToArray();
+
+        var realizedToday = todaysTrades.Sum(x => x.NetProfit);
+        _dayStartBalance = Account.Balance - realizedToday;
+        if (!double.IsFinite(_dayStartBalance) || _dayStartBalance <= 0)
+            _dayStartBalance = Account.Balance;
+
         _consecutiveLosses = 0;
         _locked = false;
-        var history = History.FindAll(Label, SymbolName).OrderByDescending(x => x.ClosingTime).ToArray();
-        foreach (var position in history)
+        foreach (var trade in todaysTrades)
         {
-            if (position.ClosingTime.Date != _day) break;
-            if (position.NetProfit < 0) _consecutiveLosses++;
-            else if (position.NetProfit > 0) break;
+            if (trade.NetProfit < 0) _consecutiveLosses++;
+            else if (trade.NetProfit > 0) break;
         }
         if (_consecutiveLosses >= MaxConsecutiveLosses) _locked = true;
     }
