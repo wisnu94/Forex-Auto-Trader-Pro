@@ -1,8 +1,7 @@
 """cTrader Open API cloud execution adapter.
 
-Default mode is DEMO. The module contains pure validation/conversion helpers and a
-one-shot Twisted client for scheduled cloud runs. Live trading remains locked unless
-CTRADER_ALLOW_LIVE=true and TRADING_MODE=LIVE are both explicitly set.
+Default mode is DEMO. Pure helpers are network-free and directly testable.
+Live trading remains locked unless both live switches are explicitly enabled.
 """
 
 from __future__ import annotations
@@ -11,13 +10,12 @@ import os
 from dataclasses import dataclass
 from typing import Final
 
-
 _ALLOWED_MODES: Final[frozenset[str]] = frozenset({"DEMO", "LIVE"})
 _ALLOWED_SIDES: Final[frozenset[str]] = frozenset({"BUY", "SELL"})
 
 
 class CTraderConfigError(ValueError):
-    """Raised when cTrader configuration is invalid."""
+    """Raised when cTrader configuration or trade parameters are invalid."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,18 +71,12 @@ class CTraderConfig:
         )
 
 
-def validate_trade_signal(
-    side: str,
-    entry: float,
-    stop_loss: float,
-    take_profit: float,
-) -> str:
+def validate_trade_signal(side: str, entry: float, stop_loss: float, take_profit: float) -> str:
     normalized = side.strip().upper()
     if normalized not in _ALLOWED_SIDES:
         raise CTraderConfigError("Signal harus BUY atau SELL")
     if not all(value > 0 for value in (entry, stop_loss, take_profit)):
         raise CTraderConfigError("Entry, SL, dan TP harus > 0")
-
     if normalized == "BUY" and not (stop_loss < entry < take_profit):
         raise CTraderConfigError("BUY membutuhkan SL < entry < TP")
     if normalized == "SELL" and not (take_profit < entry < stop_loss):
@@ -93,10 +85,8 @@ def validate_trade_signal(
 
 
 def relative_protection(entry: float, stop_loss: float, take_profit: float) -> tuple[int, int]:
-    sl_distance = abs(entry - stop_loss)
-    tp_distance = abs(take_profit - entry)
-    sl = int(round(sl_distance * 100000))
-    tp = int(round(tp_distance * 100000))
+    sl = int(round(abs(entry - stop_loss) * 100000))
+    tp = int(round(abs(take_profit - entry) * 100000))
     if sl <= 0 or tp <= 0:
         raise CTraderConfigError("Jarak SL/TP terlalu kecil")
     return sl, tp
@@ -136,16 +126,15 @@ def run_one_shot_order(
     stop_loss: float,
     take_profit: float,
 ) -> None:
-    """Connect, authenticate, and send one protected market order.
-
-    The official Spotware Python SDK is imported lazily so pure helpers remain
-    testable without network credentials.
-    """
-    from ctrader_open_api import Client, EndPoints, Protobuf, TcpProtocol
+    """Connect, authenticate, send one protected market order, then exit."""
+    from ctrader_open_api import Client, EndPoints, TcpProtocol
     from ctrader_open_api.messages.OpenApiMessages_pb2 import (
         ProtoOAAccountAuthReq,
+        ProtoOAAccountAuthRes,
         ProtoOAApplicationAuthReq,
+        ProtoOAApplicationAuthRes,
         ProtoOANewOrderReq,
+        ProtoOAExecutionEvent,
     )
     from ctrader_open_api.messages.OpenApiModelMessages_pb2 import (
         ProtoOAOrderType,
@@ -156,72 +145,70 @@ def run_one_shot_order(
     host = EndPoints.PROTOBUF_LIVE_HOST if config.mode == "LIVE" else EndPoints.PROTOBUF_DEMO_HOST
     client = Client(host, EndPoints.PROTOBUF_PORT, TcpProtocol)
     parameters = build_order_parameters(side, entry, stop_loss, take_profit, config.volume_units)
-    completed = {"value": False}
+    finished = {"value": False}
 
-    def fail(message: str) -> None:
-        if completed["value"]:
+    def finish(message: str, failed: bool = False) -> None:
+        if finished["value"]:
             return
-        completed["value"] = True
+        finished["value"] = True
         print(message)
         try:
             client.stopService()
         finally:
             reactor.stop()
+        if failed:
+            raise RuntimeError(message)
+
+    def on_error(failure: object) -> None:
+        finish(f"cTrader API error: {failure}", failed=True)
+
+    def send_account_auth(current_client: object) -> None:
+        request = ProtoOAAccountAuthReq()
+        request.ctidTraderAccountId = config.account_id
+        request.accessToken = config.access_token
+        deferred = current_client.send(request)
+        deferred.addCallback(on_account_auth)
+        deferred.addErrback(on_error)
+
+    def on_application_auth(_message: object) -> None:
+        send_account_auth(client)
+
+    def on_account_auth(message: object) -> None:
+        if not isinstance(message, ProtoOAAccountAuthRes):
+            finish(f"Unexpected account auth response: {message}", failed=True)
+            return
+
+        request = ProtoOANewOrderReq()
+        request.ctidTraderAccountId = config.account_id
+        request.symbolId = config.symbol_id
+        request.orderType = ProtoOAOrderType.Value("MARKET")
+        request.tradeSide = ProtoOATradeSide.Value(str(parameters["tradeSide"]))
+        request.volume = int(parameters["volume"])
+        request.relativeStopLoss = int(parameters["relativeStopLoss"])
+        request.relativeTakeProfit = int(parameters["relativeTakeProfit"])
+        deferred = client.send(request)
+        deferred.addCallback(on_order_response)
+        deferred.addErrback(on_error)
+
+    def on_order_response(message: object) -> None:
+        if isinstance(message, ProtoOAExecutionEvent):
+            finish(f"cTrader execution response: {message}")
+            return
+        finish(f"Unexpected order response: {message}", failed=True)
 
     def connected(current_client: object) -> None:
         request = ProtoOAApplicationAuthReq()
         request.clientId = config.client_id
         request.clientSecret = config.client_secret
         deferred = current_client.send(request)
-        deferred.addErrback(lambda failure: fail(f"Application auth failed: {failure}"))
-
-    def on_message(current_client: object, message: object) -> None:
-        if completed["value"]:
-            return
-        payload = Protobuf.extract(message)
-        payload_type = getattr(payload, "payloadType", None)
-
-        if payload_type == ProtoOAApplicationAuthReq().payloadType:
-            return
-
-        if payload_type == ProtoOAApplicationAuthReq().payloadType + 2:
-            auth = ProtoOAAccountAuthReq()
-            auth.ctidTraderAccountId = config.account_id
-            auth.accessToken = config.access_token
-            deferred = current_client.send(auth)
-            deferred.addErrback(lambda failure: fail(f"Account auth failed: {failure}"))
-            return
-
-        if payload_type == ProtoOAAccountAuthReq().payloadType:
-            order = ProtoOANewOrderReq()
-            order.ctidTraderAccountId = config.account_id
-            order.symbolId = config.symbol_id
-            order.orderType = ProtoOAOrderType.Value("MARKET")
-            order.tradeSide = ProtoOATradeSide.Value(str(parameters["tradeSide"]))
-            order.volume = int(parameters["volume"])
-            order.relativeStopLoss = int(parameters["relativeStopLoss"])
-            order.relativeTakeProfit = int(parameters["relativeTakeProfit"])
-            deferred = current_client.send(order)
-            deferred.addErrback(lambda failure: fail(f"Order request failed: {failure}"))
-            return
-
-        if payload_type == order_payload_type():
-            completed["value"] = True
-            print(f"cTrader execution response: {payload}")
-            try:
-                client.stopService()
-            finally:
-                reactor.stop()
-
-    def order_payload_type() -> int:
-        return 2106
+        deferred.addCallback(on_application_auth)
+        deferred.addErrback(on_error)
 
     def disconnected(_current_client: object, reason: object) -> None:
-        if not completed["value"]:
-            fail(f"cTrader disconnected: {reason}")
+        if not finished["value"]:
+            finish(f"cTrader disconnected before completion: {reason}", failed=True)
 
     client.setConnectedCallback(connected)
     client.setDisconnectedCallback(disconnected)
-    client.setMessageReceivedCallback(on_message)
     client.startService()
     reactor.run()
